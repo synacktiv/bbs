@@ -191,7 +191,7 @@ func handleSOCKSConnection(client net.Conn, ctx context.Context, cancel context.
 	gChainsConf.mu.RUnlock()
 
 	if !ok {
-		gMetaLogger.Errorf("chain '%v' returned by PAC script is not declared in configuration", chainStr)
+		gMetaLogger.Errorf("chain '%v' is not declared in configuration", chainStr)
 		client.Write([]byte{5, 1})
 		return
 	}
