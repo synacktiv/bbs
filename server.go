@@ -199,12 +199,19 @@ func handleSOCKSConnection(client net.Conn, ctx context.Context, cancel context.
 	// ***** END Routing decision *****
 
 	// ***** BEGIN Connection to target host  *****
-
+	
+	//Prepare chain representation string for logging purposes
+	chainRepresentation := ""
+	for _, v := range chain.proxies {
+		chainRepresentation = chainRepresentation + (v).address() + " > "
+	}
+	
 	//Connect to chain
 	target, err := chain.connect(addr)
 
 	if err != nil {
 		gMetaLogger.Error(err)
+		gMetaLogger.Auditf("| ERROR\t| %v\t| %v\t| %v%v (err: %v)\n", &client, chainStr, chainRepresentation, addr, err.Error())
 		client.Write([]byte{5, 1})
 		return
 	}
@@ -213,10 +220,7 @@ func handleSOCKSConnection(client net.Conn, ctx context.Context, cancel context.
 	gMetaLogger.Debugf("Client %v connected to host %v through chain %v", client, addr, chainStr)
 
 	// Create auditing trace for connection opening and defering closing trace
-	chainRepresentation := ""
-	for _, v := range chain.proxies {
-		chainRepresentation = chainRepresentation + (v).address() + " > "
-	}
+
 	gMetaLogger.Auditf("| OPEN\t| %v\t| %v\t| %v%v\n", &client, chainStr, chainRepresentation, addr)
 	defer gMetaLogger.Auditf("| CLOSE\t| %v\t| %v\t| %v%v\n", &client, chainStr, chainRepresentation, addr)
 
