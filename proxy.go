@@ -82,38 +82,15 @@ func (chain proxyChain) connect(address string) (net.Conn, string, error) {
 	}
 	gMetaLogger.Debugf("Initiate connection to %v", address)
 
-	// Used to transfer connectN return values through a channel
-	type ConnectResult struct {
-		conn net.Conn
-		repr string
-		err  error
-	}
-
-	resultCh := make(chan ConnectResult)
-	//defer close(resultCh)
-
 	// timeout context used to stop the connection through the proxy chain after chain.tcpReadTimeout millisecond
 	gMetaLogger.Debugf("timeout : %v", chain.tcpReadTimeout)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(chain.tcpReadTimeout)*time.Millisecond)
 	defer cancel()
 
-	// start connectN
-	go func() {
-		conn, repr, err := chain.connectN(ctx, len(chain.proxies), address)
-		resultCh <- ConnectResult{conn, repr, err}
-		close(resultCh)
-	}()
-
-	select {
-	case result := <-resultCh:
-		gMetaLogger.Debugf("connectN returned before timeout")
-		return result.conn, result.repr, result.err
-
-	case <-ctx.Done():
-		gMetaLogger.Errorf("timeout during connectN(%v, %v)", len(chain.proxies), address)
-		err := fmt.Errorf("timeout during connectN")
-		return nil, "", err
-	}
+	// Start connectN
+	conn, repr, err := chain.connectN(ctx, len(chain.proxies), address)
+	gMetaLogger.Debugf("connectN returned before timeout")
+	return conn, repr, err
 
 }
 
