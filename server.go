@@ -232,7 +232,7 @@ func handleSOCKSConnection(client net.Conn, ctx context.Context, cancel context.
 	}
 	gMetaLogger.Debugf("sent SOCKS success response")
 
-	// ***** BEGIN Connection to target host  *****
+	// ***** END Connection to target host  *****
 
 	relay(client, target)
 
