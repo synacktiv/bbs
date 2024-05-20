@@ -34,7 +34,7 @@ type proxyChain struct {
 }
 
 // connect takes a destination address string (format host:port) and returns a net.Conn connected to this address through the chain of proxies.
-func (chain proxyChain) connect(address string) (net.Conn, error) {
+func (chain proxyChain) connect(address string) (net.Conn, string, error) {
 
 	// If a custom hosts file (with the /etc/hosts format) is provided, the matching hostnames are replaced by their hardcoded IP address.
 	// This overrides proxyDns: matching hostnames will be replaces by their IP address even if proxyDns=true.
@@ -42,7 +42,7 @@ func (chain proxyChain) connect(address string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(address)
 		if err != nil {
 			werr := fmt.Errorf("could not split host from %v : %w", address, err)
-			return nil, werr
+			return nil, "", werr
 		}
 
 		resolved, ok := gHosts[host]
@@ -59,7 +59,7 @@ func (chain proxyChain) connect(address string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(address) // splits the provided address string (host:port format) into a host and a port string
 		if err != nil {
 			werr := fmt.Errorf("could not split host from %v : %w", address, err)
-			return nil, werr
+			return nil, "", werr
 		}
 
 		if net.ParseIP(host) == nil { // host does not have an IP address format
@@ -67,12 +67,12 @@ func (chain proxyChain) connect(address string) (net.Conn, error) {
 			ips, err := net.LookupIP(host)
 			if err != nil {
 				werr := fmt.Errorf("lookup on %v failed: %w", host, err)
-				return nil, werr
+				return nil, "", werr
 			}
 
 			if len(ips) == 0 {
 				err := fmt.Errorf("no IP returned from DNS resolution of %v", host)
-				return nil, err
+				return nil, "", err
 			}
 
 			gMetaLogger.Debugf("Found IP address: %v", ips[0])
@@ -85,6 +85,7 @@ func (chain proxyChain) connect(address string) (net.Conn, error) {
 	// Used to transfer connectN return values through a channel
 	type ConnectResult struct {
 		conn net.Conn
+		repr string
 		err  error
 	}
 
@@ -98,32 +99,39 @@ func (chain proxyChain) connect(address string) (net.Conn, error) {
 
 	// start connectN
 	go func() {
-		conn, err := chain.connectN(ctx, len(chain.proxies), address)
-		resultCh <- ConnectResult{conn, err}
+		conn, repr, err := chain.connectN(ctx, len(chain.proxies), address)
+		resultCh <- ConnectResult{conn, repr, err}
 		close(resultCh)
 	}()
 
 	select {
 	case result := <-resultCh:
 		gMetaLogger.Debugf("connectN returned before timeout")
-		return result.conn, result.err
+		return result.conn, result.repr, result.err
 
 	case <-ctx.Done():
 		gMetaLogger.Errorf("timeout during connectN(%v, %v)", len(chain.proxies), address)
 		err := fmt.Errorf("timeout during connectN")
-		return nil, err
+		return nil, "", err
 	}
 
 }
 
 // connectN is a recursive function returning a net.Conn (representing a TCP socket) connected to address through the subchain made of the n first proxies of the proxy chain.
 // It takes ctx context parameter for timeout implementation.
-func (chain proxyChain) connectN(ctx context.Context, n int, address string) (conn net.Conn, err error) {
+func (chain proxyChain) connectN(ctx context.Context, n int, address string) (conn net.Conn, repr string, err error) {
 	var d net.Dialer
+
+	repr = ""
 
 	if n == 0 { // If the subchain contains no proxy, directly connect to the provided address
 		gMetaLogger.Debugf("connectN called with n=0. Connect to %v directly.", address)
 		conn, err = d.DialContext(ctx, "tcp", address)
+		if err != nil {
+			repr += fmt.Sprintf("-X-> %v (%v)", address, err.Error())
+		} else {
+			repr += fmt.Sprintf("---> %v", address)
+		}
 		return
 	} else { // Otherwise, connect recursively through the whole subchain
 
@@ -131,11 +139,15 @@ func (chain proxyChain) connectN(ctx context.Context, n int, address string) (co
 			gMetaLogger.Debugf("connectN called with n=1. Connect to the only proxy %v", (chain.proxies[n-1]).address())
 			conn, err = d.DialContext(ctx, "tcp", (chain.proxies[n-1]).address())
 			if err != nil {
+				repr += fmt.Sprintf("-X-> %v (%v)", (chain.proxies[n-1]).address(), err.Error())
 				return
 			}
+			repr += fmt.Sprintf("---> %v", (chain.proxies[n-1]).address())
+
 		} else { // Otherwise (multiple proxies), recursively call connectN to obtain an "indirect" TCP connection to the suchain's last proxy through the 1-proxy-shorter subchain.
 			gMetaLogger.Debugf("connectN called with n=%v (>1). Recursively calling connectN.", n)
-			conn, err = chain.connectN(ctx, n-1, (chain.proxies[n-1]).address())
+
+			conn, repr, err = chain.connectN(ctx, n-1, (chain.proxies[n-1]).address())
 			if err != nil {
 				return
 			}
@@ -144,7 +156,6 @@ func (chain proxyChain) connectN(ctx context.Context, n int, address string) (co
 		// Once we have a connection to the subchain's last proxy, proceed to the subchain's last proxy's handshake to connect to provided address
 		// TODO: implement a timeout on the handshake
 		gMetaLogger.Debugf("Establishing connection to %v through proxy %v", address, (chain.proxies[n-1]).address())
-
 		resultCh := make(chan error)
 
 		go func() {
@@ -164,9 +175,10 @@ func (chain proxyChain) connectN(ctx context.Context, n int, address string) (co
 		if err != nil {
 			conn.Close() // Should cancel any read or write operation on conn in handshake() in case ctx is Done
 			conn = nil
+			repr += fmt.Sprintf(" =X=> %v (%v)", address, err.Error())
 			return
 		}
-
+		repr += fmt.Sprintf(" ===> %v", address)
 	}
 
 	return
