@@ -1,7 +1,7 @@
 package main
 
 import (
-	"bbs/logger"
+	"github.com/synacktiv/bbs/logger"
 	"io"
 	"os"
 	"os/signal"
