@@ -7,20 +7,15 @@ CONNECT) service and forwards incoming requests to proxies or chains of proxies
 based on the request's target. Routing can be configured with a PAC script (if
 built with PAC support), or through a JSON file.
 
-## Build 
-
-Clone the repository, then: 
+## Install 
 
 ```bash
-cd bbs
-go mod init bbs
-go mod tidy
-go build
+go install github.com/synacktiv/bbs@master
 ```
 
-To build bbs with PAC script support: 
+To install bbs with PAC script support: 
 ```bash
-go build -tags pac
+go install -tags pac github.com/synacktiv/bbs@master
 ```
 
 Note: PAC relies on unaudited third-party libraries.
