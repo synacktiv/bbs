@@ -2,8 +2,8 @@
 
 ## Description
 
-`bbs` is a router for SOCKS and HTTP proxies. It exposes a SOCKS5 (or HTTP
-CONNECT) service and forwards incoming requests to proxies or chains of proxies
+`bbs` is a router for SOCKS and HTTP proxies. It exposes SOCKS5 or HTTP
+CONNECT services and forwards incoming requests to proxies or chains of proxies
 based on the request's target. Routing can be configured with a PAC script (if
 built with PAC support), or through a JSON file.
 
@@ -101,59 +101,73 @@ Configuration example:
 ### Routing JSON configuration
 
 The built-in configuration mode for routing is a JSON file. It associates
-addresses with chain names. The file must contain an array of rule blocks. Each
+addresses with chain names. The file must contain a dictionary of routing tables.
+Each routing table is an array of rule blocks. Each
 rule block contains a `comment`, a set of `rules`, and an associated chain
 name. Rules are evaluated: given an address in the `host:port` format, they can
 be `true` or `false`. For a given address, blocks are evaluated in their
 declaration order. The evaluation stops at the first block that is `true` and
-the associated chain name is returned.
+the associated chain name is returned. Each opened server (with the -server flag)
+is associated with one routing table from the configuration. Requests received on 
+each server are routed according to the matching routing table.
 
 Here is an example configuration:
 
 ```json
-[
-  {
-    "comment": "Block1 comment",
-    "rules": {
-      "rule": "regexp",
-      "variable": "host",
-      "content": "me\\.gandi\\.net"
-    },
-    "route": "chain2"
-  },
-  {
-    "comment": "Route web traffic towards 10.35.0.0/16 through chain1",
-    "rules": {
-      "rule1": {
-        "rule": "subnet",
-        "content": "10.35.0.0/16"
+{
+  "table1": [
+    {
+      "comment": "Block1 comment",
+      "rules": {
+        "rule": "regexp",
+        "variable": "host",
+        "content": "me\\.gandi\\.net"
       },
-      "op": "AND",
-      "rule2": {
+      "route": "chain2"
+    },
+    {
+      "comment": "Route web traffic towards 10.35.0.0/16 through chain1",
+      "rules": {
+        "rule1": {
+          "rule": "subnet",
+          "content": "10.35.0.0/16"
+        },
+        "op": "AND",
+        "rule2": {
+          "rule": "regexp",
+          "variable": "port",
+          "content": "^(80|443)$"
+        }
+      },
+      "route": "chain1"
+    },
+    {
+      "comment": "Drop traffic to 445",
+      "rules": {
         "rule": "regexp",
         "variable": "port",
-        "content": "^(80|443)$"
-      }
+        "content": "^445$"
+      },
+      "route": "drop"
     },
-    "route": "chain1"
-  },
-  {
-    "comment": "Drop traffic to 445",
-    "rules": {
-      "rule": "regexp",
-      "variable": "port",
-      "content": "^445$"
-    },
-    "route": "drop"
-  },
-  {
-    "comment": "Default routing through direct chain",
-    "rules": {
-      "rule": "true"
-    },
-    "route": "direct"
-  }
-]
+    {
+      "comment": "Default routing through direct chain",
+      "rules": {
+        "rule": "true"
+      },
+      "route": "direct"
+    }
+  ],
+  "table2": [
+    {
+      "comment": "Default table2 routing through direct chain",
+      "rules": {
+        "rule": "true"
+      },
+      "route": "direct"
+    }
+  ]
+}
 ```
 
 Block fields:
@@ -182,7 +196,8 @@ bbs is built without PAC support, `-routes` default value is `routes.json`. If
 bbs is built with PAC support, `-routes` has no default value and must be
 explicitly defined in order to use a JSON file for routing (note that with PAC
 support, `-routes` and `-pac` are mutually exclusive and collectively
-exhaustive)
+exhaustive). PAC file routing does not support multiple routing tables. The same
+PAC file will be used for every opened server.
 
 
 ### PAC script
