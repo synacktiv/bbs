@@ -20,13 +20,10 @@ var gArgConfigPath string
 var gArgPACPath string
 var gArgRoutingConfigPath string
 
-var gArgListen string
 var gArgServers servers
 
 var gArgQuietBool bool
 var gArgVerboseBool bool
-
-var gArgHttpListen string
 
 var gArgCustomHosts string
 
@@ -57,8 +54,8 @@ func (ss *servers) Set(str string) error {
 func parseArgs() {
 	flag.BoolVar(&gArgQuietBool, "q", false, "Quiet mode")
 	flag.BoolVar(&gArgVerboseBool, "v", false, "Verbose mode")
-	flag.StringVar(&gArgListen, "socks", "127.0.0.1:8851", "Address and port to listen on (format: local_addr:local_port)")
-	flag.StringVar(&gArgHttpListen, "http", "", "Address and port to listen on for HTTP CONNECT input (format: local_addr:local_port) (no http listener by default)")
+	//flag.StringVar(&gArgListen, "socks", "127.0.0.1:8851", "Address and port to listen on (format: local_addr:local_port)")
+	//flag.StringVar(&gArgHttpListen, "http", "", "Address and port to listen on for HTTP CONNECT input (format: local_addr:local_port) (no http listener by default)")
 	flag.StringVar(&gArgAuditPath, "audit-file", "", "File to output audit traces. Output to STDOUT if empty")
 	flag.BoolVar(&gArgAuditBoth, "audit-both", false, "Output audit traces to both -audit-file and STDOUT.")
 	flag.StringVar(&gArgLogPath, "log-file", "", "File to output logs. Output to STDOUT if empty")
@@ -72,7 +69,7 @@ func parseArgs() {
 	} else {
 		flag.StringVar(&gArgRoutingConfigPath, "routes", "./routes.json", "JSON routing configuration file path")
 	}
-	flag.Var(&gArgServers, "server", "A server to open (format protocol://addr:port:routing_table)")
+	flag.Var(&gArgServers, "server", "A server to open (format protocol://addr:port:routing_table) (can be used multiple times)")
 
 	flag.Parse()
 
