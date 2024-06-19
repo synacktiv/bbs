@@ -8,6 +8,8 @@ import (
 	"os"
 )
 
+type servers []string
+
 var gArgLogPath string
 var gArgAuditPath string
 var gArgAuditBoth bool
@@ -19,6 +21,7 @@ var gArgPACPath string
 var gArgRoutingConfigPath string
 
 var gArgListen string
+var gArgServers servers
 
 var gArgQuietBool bool
 var gArgVerboseBool bool
@@ -30,6 +33,24 @@ var gArgCustomHosts string
 func cmdlineError(a ...interface{}) {
 	fmt.Fprintln(os.Stderr, a...)
 	os.Exit(1)
+}
+
+func (ss *servers) String() string {
+	if ss != nil {
+		str := ""
+		for _, s := range *ss {
+			str += s + " "
+		}
+	}
+	return ""
+}
+
+func (ss *servers) Set(str string) error {
+
+	*ss = append(*ss, str)
+	fmt.Fprintln(os.Stdout, "added new server")
+
+	return nil
 }
 
 // parseArgs parses the command line arguments, performs some checks, and store them in the associated global variables
@@ -51,6 +72,8 @@ func parseArgs() {
 	} else {
 		flag.StringVar(&gArgRoutingConfigPath, "routes", "./routes.json", "JSON routing configuration file path")
 	}
+	flag.Var(&gArgServers, "server", "A server to open (format protocol://addr:port:routing_table)")
+
 	flag.Parse()
 
 	if gArgQuietBool && gArgVerboseBool {

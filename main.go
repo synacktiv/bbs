@@ -1,12 +1,13 @@
 package main
 
 import (
-	"github.com/synacktiv/bbs/logger"
 	"io"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/synacktiv/bbs/logger"
 )
 
 var gChainsConf chainsConf
@@ -79,6 +80,21 @@ func main() {
 
 	// ***** END Logs setup *****
 
+	// ***** BEGIN Server args parsing *****
+
+	var servers []server
+	for _, s := range gArgServers {
+		server, err := newServer(s)
+		if err != nil {
+			gMetaLogger.Errorf("could not create new server with string %s: %v", s, err)
+			continue
+		}
+		servers = append(servers, *server)
+		gMetaLogger.Debugf("added server %s to servers list", server.String())
+	}
+
+	// ***** END Server args parsing ******
+
 	// ***** BEGIN Configuration files loading *****
 
 	// Output PID needed to hot reload configuration files
@@ -95,6 +111,44 @@ func main() {
 			sig := <-signalCh
 			gMetaLogger.Infof("Signal %v received, reloading configurations", sig)
 
+			// If -pac is not defined, use JSON routing configuration file
+			if gArgPACPath == "" {
+				routing, err := parseRoutingConfig(gArgRoutingConfigPath)
+				if err != nil {
+					gMetaLogger.Errorf("error parsing JSON routing configuration: %v", err)
+					continue
+				}
+				var allExists bool
+				allExists = true
+
+				for _, s := range servers {
+					_, exists := routing[s.table]
+					if !exists {
+						gMetaLogger.Errorf("routing table %s is not defined in the parsed routing configuration", s.table)
+						allExists = false
+					}
+				}
+
+				if !allExists {
+					continue
+				}
+
+				gRoutingConf.mu.Lock()
+				gRoutingConf.routing = routing
+				gRoutingConf.valid = true
+				gRoutingConf.mu.Unlock()
+				gMetaLogger.Info("Global JSON routing configuration updated")
+				gMetaLogger.Debugf("routing config: %v", routing)
+			} else { // Otherwise, use PAC file
+				err := reloadPACConf(gArgPACPath)
+				if err != nil {
+					gMetaLogger.Errorf("error reloading pac file: %v", err)
+					continue
+				}
+				gMetaLogger.Info("Global PAC configuration updated")
+			}
+
+			// Load proxies and chains configuration
 			confProxyChains, err := parseConfig(gArgConfigPath)
 			if err != nil {
 				gMetaLogger.Errorf("error parsing JSON configuration: %v", err)
@@ -106,28 +160,6 @@ func main() {
 			gChainsConf.valid = true
 			gChainsConf.mu.Unlock()
 			gMetaLogger.Info("Global JSON configuration updated")
-
-			// If -pac is not defined, use JSON routing configuration file
-			if gArgPACPath == "" {
-				routingConfig, err := parseRoutingConfig(gArgRoutingConfigPath)
-				if err != nil {
-					gMetaLogger.Errorf("error parsing JSON routing configuration: %v", err)
-					continue
-				}
-				gRoutingConf.mu.Lock()
-				gRoutingConf.routing = routingConfig
-				gRoutingConf.valid = true
-				gRoutingConf.mu.Unlock()
-				gMetaLogger.Info("Global JSON routing configuration updated")
-				gMetaLogger.Debugf("routing config: %v", routingConfig)
-			} else { // Otherwise, use PAC file
-				err := reloadPACConf(gArgPACPath)
-				if err != nil {
-					gMetaLogger.Errorf("error reloading pac file: %v", err)
-					continue
-				}
-				gMetaLogger.Info("Global PAC configuration updated")
-			}
 
 			// Load custom host resolution config file
 			if gArgCustomHosts != "" {
@@ -163,13 +195,12 @@ func main() {
 
 	// ***** BEGIN Run server *****
 
-	// Start a HTTP CONNECT proxy listenner
-	if gArgHttpListen != "" {
-		go run(gArgHttpListen, HTTPCONNECT)
+	for _, s := range servers {
+		go s.run()
 	}
-	// Start a SOCKS5 proxy listenner
-	run(gArgListen, SOCKS5)
 
 	// ***** END Run server *****
-
+	for {
+		time.Sleep(1 * time.Hour)
+	}
 }
