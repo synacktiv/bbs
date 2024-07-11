@@ -122,6 +122,15 @@ Here is an example configuration:
     "route": "chain2"
   },
   {
+    "comment": "Route *.corp.local through chain2",
+    "rules": {
+      "rule": "regexp",
+      "variable": "host",
+      "content": "(?i)^(.*\\.)?corp\\.local$"
+    },
+    "route": "chain2"
+  },
+  {
     "comment": "Route web traffic towards 10.35.0.0/16 through chain1",
     "rules": {
       "rule1": {

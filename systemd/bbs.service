@@ -1,0 +1,10 @@
+[Unit]
+Description=bbs
+
+[Service]
+WorkingDirectory=%h/.config/bbs/
+ExecStart=%h/go/bin/bbs -audit-file logs/bbs.log -log-file logs/log.log -log-both
+ExecReload=kill -HUP $MAINPID
+
+[Install]
+WantedBy=default.target
