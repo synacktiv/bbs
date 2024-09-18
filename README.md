@@ -151,6 +151,15 @@ Here is an example configuration:
       "route": "drop"
     },
     {
+      "comment": "Route *.corp.local through chain2",
+      "rules": {
+        "rule": "regexp",
+        "variable": "host",
+        "content": "(?i)^(.*\\.)?corp\\.local$"
+      },
+      "route": "chain2"
+   }
+    {
       "comment": "Default routing through direct chain",
       "rules": {
         "rule": "true"

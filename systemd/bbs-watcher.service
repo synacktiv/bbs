@@ -1,0 +1,9 @@
+[Unit]
+Description=bbs restarter
+
+[Service]
+Type=oneshot
+ExecStart=systemctl --user reload bbs.service
+
+[Install]
+WantedBy=default.target

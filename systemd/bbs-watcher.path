@@ -1,0 +1,5 @@
+[Path]
+PathModified=%h/.config/bbs
+
+[Install]
+WantedBy=default.target
