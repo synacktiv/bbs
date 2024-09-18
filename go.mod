@@ -1,6 +1,6 @@
 module github.com/synacktiv/bbs
 
-go 1.19
+go 1.23.0
 
 require github.com/darren/gpac v0.0.0-20210609082804-b56d6523a3af
 
