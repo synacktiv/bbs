@@ -34,7 +34,7 @@ type proxyChain struct {
 }
 
 // connect takes a destination address string (format host:port) and returns a net.Conn connected to this address through the chain of proxies.
-func (chain proxyChain) connect(address string) (net.Conn, string, error) {
+func (chain proxyChain) connect(ctx context.Context, address string) (net.Conn, string, error) {
 
 	// If a custom hosts file (with the /etc/hosts format) is provided, the matching hostnames are replaced by their hardcoded IP address.
 	// This overrides proxyDns: matching hostnames will be replaces by their IP address even if proxyDns=true.
@@ -64,7 +64,7 @@ func (chain proxyChain) connect(address string) (net.Conn, string, error) {
 
 		if net.ParseIP(host) == nil { // host does not have an IP address format
 			gMetaLogger.Debugf("Chain is configured with proxyDns=false. Performing local DNS resolution of %v", host)
-			ips, err := net.LookupIP(host)
+			ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
 			if err != nil {
 				werr := fmt.Errorf("lookup on %v failed: %w", host, err)
 				return nil, "", werr
@@ -84,7 +84,7 @@ func (chain proxyChain) connect(address string) (net.Conn, string, error) {
 
 	// timeout context used to stop the connection through the proxy chain after chain.tcpReadTimeout millisecond
 	gMetaLogger.Debugf("timeout : %v", chain.tcpReadTimeout)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(chain.tcpReadTimeout)*time.Millisecond)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(chain.tcpReadTimeout)*time.Millisecond)
 	defer cancel()
 
 	// Start connectN

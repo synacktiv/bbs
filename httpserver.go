@@ -108,7 +108,7 @@ func (h httpHandler) connHandle(client net.Conn, table string, ctx context.Conte
 	// ***** BEGIN Connection to target host  *****
 
 	//Connect to chain
-	target, chainRepresentation, err := chain.connect(addr)
+	target, chainRepresentation, err := chain.connect(ctx, addr)
 
 	if err != nil {
 		gMetaLogger.Error(err)
