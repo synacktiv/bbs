@@ -20,8 +20,6 @@ var gArgConfigPath string
 var gArgPACPath string
 var gArgRoutingConfigPath string
 
-var gArgServers servers
-
 var gArgQuietBool bool
 var gArgVerboseBool bool
 
@@ -69,7 +67,6 @@ func parseArgs() {
 	} else {
 		flag.StringVar(&gArgRoutingConfigPath, "routes", "./routes.json", "JSON routing configuration file path")
 	}
-	flag.Var(&gArgServers, "server", "A server to open (format protocol://addr:port:routing_table) (can be used multiple times)")
 
 	flag.Parse()
 
