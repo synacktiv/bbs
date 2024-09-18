@@ -23,6 +23,18 @@ type baseProxy struct {
 	pass string
 }
 
+func newProxy(prot string, host string, port string, user string, pass string) (proxy, error) {
+	switch prot {
+	case "socks5":
+		return socks5{baseProxy{host: host, port: port, user: user, pass: pass}}, nil
+	case "httpconnect":
+		return httpConnect{baseProxy{host: host, port: port, user: user, pass: pass}}, nil
+	default:
+		err := fmt.Errorf("unknown proxy protocol %v", prot)
+		return nil, err
+	}
+}
+
 // A proxyChain struct represents a chain of proxy interfaces stored in proxies, and some parameters associated to the chain.
 // The parameters correspond to the proxychains-ng configuration file parameters (https://github.com/rofl0r/proxychains-ng).
 

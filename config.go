@@ -62,14 +62,21 @@ func parseConfig(configPath string) (confProxyChains map[string]proxyChain, err 
 					user, _ := proxyConf["user"].(string)
 					pass, _ := proxyConf["pass"].(string)
 
-					switch prot {
-					case "socks5":
-						confProxies[proxyName] = &socks5{baseProxy{host: host, port: port, user: user, pass: pass}}
+					// switch prot {
+					// case "socks5":
+					// 	confProxies[proxyName] = &socks5{baseProxy{prot: "socks5", host: host, port: port, user: user, pass: pass}}
 
-					case "httpconnect":
-						confProxies[proxyName] = &httpConnect{baseProxy{host: host, port: port, user: user, pass: pass}}
-					default:
-						err = fmt.Errorf("unknown proxy protocol %v in proxy %v", prot, proxyName)
+					// case "httpconnect":
+					// 	confProxies[proxyName] = &httpConnect{baseProxy{prot: "http", host: host, port: port, user: user, pass: pass}}
+					// default:
+					// 	err = fmt.Errorf("unknown proxy protocol %v in proxy %v", prot, proxyName)
+					// 	return
+					// }
+
+					var err2 error
+					confProxies[proxyName], err2 = newProxy(prot, host, port, user, pass)
+					if err2 != nil {
+						err = fmt.Errorf("error get new proxy %v: %v", proxyName, err2)
 						return
 					}
 
