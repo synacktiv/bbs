@@ -15,7 +15,7 @@ import (
 var gChainsConf chainsConf
 var gRoutingConf routingConf
 var gServerConf serverConf
-var gHosts map[string]string
+var gHosts hostMap
 var gMetaLogger *logger.MetaLogger
 
 func main() {
@@ -101,119 +101,118 @@ func main() {
 		sig := <-signalCh
 		gMetaLogger.Infof("Signal %v received, reloading configurations", sig)
 
-		var servers []server
-		var routing routing
-
 		gMetaLogger.Debug("Describing gServerConf.servers : ")
 		describeServers(gServerConf.servers)
 
-		// Load proxies and chains configuration
-		confProxyChains, err := parseConfig(gArgConfigPath)
+		// Load main config from the unified config file (proxies, chains, routes, servers and hosts)
+		config, err := parseMainConfig(gArgConfigPath)
 		if err != nil {
-			gMetaLogger.Errorf("error parsing JSON configuration: %v", err)
+			gMetaLogger.Errorf("error parsing main config : %v", err)
+			continue
+		}
+		gMetaLogger.Debugf("Successfully parsed main config : %v", config)
+
+		// Check that all proxies used in all chains fo chains section correspond to an existing proxy in the proxies section
+		allExist := true
+		definedProxies := slices.Collect(maps.Keys(config.Proxies))
+		for chainName, chainDesc := range config.Chains {
+			for index, proxyName := range chainDesc.Proxies {
+				if !slices.Contains(definedProxies, proxyName) {
+					gMetaLogger.Errorf("proxy %v used at index %v of chain %v is not part of the defined proxies in proxies section (%v)", proxyName, index, chainName, definedProxies)
+					allExist = false
+				}
+			}
+		}
+		if !allExist {
 			continue
 		}
 
-		// If -pac is not defined, load JSON routing configuration file, load servers and perform consistency checks
+		// If -pac is not defined, perform consistency checks on routing configuration
 		if gArgPACPath == "" {
-			routing, err = parseRoutingConfig(gArgRoutingConfigPath)
-			if err != nil {
-				gMetaLogger.Errorf("error parsing JSON routing configuration: %v", err)
-				continue
-			}
 
-			// Check that all routes defined in routing correspond to an existing chain in confProxyChains
-			allExist := true
-			definedRoutes := slices.Collect(maps.Keys(confProxyChains))
-			for _, routingTable := range routing {
-				for _, ruleBlock := range routingTable {
+			// Check that all routes defined in routes section correspond to an existing chain in the chains section
+			allExist = true
+			definedChains := slices.Collect(maps.Keys(config.Chains))
+			for routingTableName, routingTable := range config.Routes {
+				for index, ruleBlock := range routingTable {
 
-					if !slices.Contains(definedRoutes, ruleBlock.Route) {
-						gMetaLogger.Errorf("route %v defined in routing configuration is not defined in the chain configuration (%v)", ruleBlock.Route, definedRoutes)
+					if !slices.Contains(definedChains, ruleBlock.Route) {
+						gMetaLogger.Errorf("route %v defined in ruleBlock number %v of routingTable %v is not part of the defined chains in the chains section (%v)", ruleBlock.Route, index, routingTableName, definedChains)
 						allExist = false
 					}
 				}
 			}
-
 			if !allExist {
 				continue
 			}
 
-			// Load server configuration
-			servers, err = parseServerConfig("server.json")
-			if err != nil {
-				gMetaLogger.Errorf("error parsing JSON server configuration: %v", err)
-				continue
-			}
-
-			// Check that all servers defined use an existing routing table
+			// Check that all routing tables used in all servers of the servers sections correspond to an existing routing table in the routes section
 			allExist = true
-			definedTables := slices.Collect(maps.Keys(routing))
-			for _, server := range servers {
-				if !slices.Contains(definedTables, server.table) {
-					gMetaLogger.Errorf("table %v defined in server configuration is not defined in the routing configuration (%v)", server.table, definedTables)
+			definedRoutingTables := slices.Collect(maps.Keys(config.Routes))
+			for index, server := range config.Servers {
+				if !slices.Contains(definedRoutingTables, server.table) {
+					gMetaLogger.Errorf("table %v used by server number %v is not part of the defined routing tables in section routes (%v)", server.table, index, definedRoutingTables)
 					allExist = false
 				}
 			}
-
 			if !allExist {
 				continue
 			}
 
-		} else { // Otherwise, load PAC file, load servers,  and do not perform consistency checks
+		} else { // Otherwise, load PAC file and do not perform consistency checks
 			err := reloadPACConf(gArgPACPath)
 			if err != nil {
 				gMetaLogger.Errorf("error reloading pac file: %v", err)
 				continue
 			}
 			gMetaLogger.Info("Global PAC configuration updated")
-
-			// Load server configuration
-			servers, err = parseServerConfig("server.json")
-			if err != nil {
-				gMetaLogger.Errorf("error parsing JSON server configuration: %v", err)
-				continue
-			}
-		}
-
-		// Load custom host resolution config file
-		if gArgCustomHosts != "" {
-			var tmpHosts map[string]string
-			tmpHosts, err = loadHosts(gArgCustomHosts)
-			if err != nil {
-				gMetaLogger.Errorf("error parsing custom hosts file: %v", err)
-				continue
-			}
-			gHosts = tmpHosts
-			gMetaLogger.Info("Global host resolution configuration updated")
 		}
 
 		// At this point, the defined configuration should be consistent, so we can update the globals
 
-		// Update global variables if all the configuration files are consistent
+		// Build a proxyChain object from the proxyChainDesc parsed in JSON file
+
+		proxychains := make(map[string]proxyChain)
+
+		for chainName, chainDesc := range config.Chains {
+			var proxychain proxyChain
+			proxychain.proxyDns = chainDesc.ProxyDns
+			proxychain.tcpConnectTimeout = chainDesc.TcpConnectTimeout
+			proxychain.tcpReadTimeout = chainDesc.TcpReadTimeout
+
+			for _, proxyName := range chainDesc.Proxies {
+				proxychain.proxies = append(proxychain.proxies, config.Proxies[proxyName])
+			}
+
+			proxychains[chainName] = proxychain
+
+		}
 		gChainsConf.mu.Lock()
-		gChainsConf.proxychains = confProxyChains
+		gChainsConf.proxychains = proxychains
 		gChainsConf.valid = true
 		gChainsConf.mu.Unlock()
-		gMetaLogger.Info("Global JSON configuration updated")
+		gMetaLogger.Info("Global chains configuration updated")
+
+		gHosts = config.Hosts
+		gMetaLogger.Info("Global hosts configuration updated")
 
 		if gArgPACPath == "" {
 			gRoutingConf.mu.Lock()
-			gRoutingConf.routing = routing
+			gRoutingConf.routing = config.Routes
 			gRoutingConf.valid = true
 			gRoutingConf.mu.Unlock()
-			gMetaLogger.Info("Global JSON routing configuration updated")
-			gMetaLogger.Debugf("routing config: %v", routing)
+			gMetaLogger.Info("Global routing configuration updated")
+			gMetaLogger.Debugf("routing config: %v", config.Routes)
 		}
 
 		// Update global servers variable, stop old ones and start new ones
 
 		// Stoping running servers that are not defined in the new configuration
 		gMetaLogger.Debug("Describing servers : ")
-		describeServers(servers)
+		describeServers(config.Servers)
 		gServerConf.mu.Lock()
 		for i := range gServerConf.servers {
-			stillExists := slices.ContainsFunc(servers, func(s server) bool { return compare(s, gServerConf.servers[i]) })
+			stillExists := slices.ContainsFunc(config.Servers, func(s server) bool { return compare(s, gServerConf.servers[i]) })
 			if stillExists {
 				gMetaLogger.Debugf("Server %v still exists in new loaded servers, keeping it", gServerConf.servers[i])
 			} else {
@@ -224,10 +223,10 @@ func main() {
 			}
 		}
 
-		for i := range servers {
-			alreadyExists := slices.ContainsFunc(gServerConf.servers, func(s server) bool { return compare(s, servers[i]) })
+		for i := range config.Servers {
+			alreadyExists := slices.ContainsFunc(gServerConf.servers, func(s server) bool { return compare(s, config.Servers[i]) })
 			if !alreadyExists {
-				gServerConf.servers = append(gServerConf.servers, servers[i])
+				gServerConf.servers = append(gServerConf.servers, config.Servers[i])
 			}
 		}
 

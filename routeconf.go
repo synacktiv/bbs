@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"os"
 	"regexp"
 	"sync"
 )
@@ -269,27 +268,4 @@ func (table routingTable) getRoute(addr string) (route string, err error) {
 	}
 	err = fmt.Errorf("all blocks evaluated to false for %v", addr)
 	return "", err
-}
-
-// parseRoutingConfig parses the JSON routing configuration file at configPath and returns a Routing variable representing this configuration.
-func parseRoutingConfig(configPath string) (routing, error) {
-
-	fileBytes, err := os.ReadFile(configPath)
-	if err != nil {
-		err := fmt.Errorf("error reading file %v : %v", configPath, err)
-		return nil, err
-	}
-
-	var routingConfig routing
-
-	dec := json.NewDecoder(bytes.NewReader(fileBytes))
-	dec.DisallowUnknownFields()
-
-	err = dec.Decode(&routingConfig)
-	if err != nil {
-		err = fmt.Errorf("error unmarshalling routing config file : %v", err)
-		return nil, err
-	}
-
-	return routingConfig, nil
 }

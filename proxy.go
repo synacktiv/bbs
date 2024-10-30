@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
+	"strings"
 	"time"
 )
 
-// Interface representing a abstract proxy object. Implementations for HTTP CONNECT and SOCKS5 are defined in httpconnect.go and socks5.go.
+// Interface representing an abstract proxy object. Implementations for HTTP CONNECT and SOCKS5 are defined in httpconnect.go and socks5.go.
 // Support for other proxy types can be added by defining types implementing the proxy interface.
 type proxy interface {
 	// handshake takes net.Conn (representing a TCP socket) and an address and returns the same net.Conn connected to the provided address through the proxy
@@ -17,18 +19,94 @@ type proxy interface {
 }
 
 type baseProxy struct {
+	prot string
 	host string
 	port string
 	user string
 	pass string
 }
 
+type proxyMap map[string]proxy
+
+func (p *baseProxy) UnmarshalJSON(b []byte) error {
+	type tmpBaseProxy struct {
+		ConnString string
+		User       string
+		Pass       string
+	}
+
+	var tmp tmpBaseProxy
+
+	err := json.Unmarshal(b, &tmp)
+	if err != nil {
+		err = fmt.Errorf("error unmarshalling '%s' in tmpBaseProxy : %v", b, err)
+		return err
+	}
+
+	tmp2, err := newBaseProxyFromString(tmp.ConnString, tmp.User, tmp.Pass)
+	if err != nil {
+		err = fmt.Errorf("error creating new server from string: %v", err)
+		return err
+	}
+
+	p.prot = tmp2.prot
+	p.host = tmp2.host
+	p.port = tmp2.port
+	p.user = tmp2.user
+	p.pass = tmp2.pass
+
+	return nil
+}
+
+func (p *proxyMap) UnmarshalJSON(b []byte) error {
+	var tmp map[string]baseProxy
+
+	err := json.Unmarshal(b, &tmp)
+	if err != nil {
+		err = fmt.Errorf("error unmarshalling '%s' in map[string]baseProxy : %v", b, err)
+		return err
+	}
+	*p = make(map[string]proxy)
+	gMetaLogger.Debug("ok")
+	for k, v := range tmp {
+		(*p)[k], err = newProxy(v.prot, v.host, v.port, v.user, v.pass)
+		if err != nil {
+			err = fmt.Errorf("error creating new proxy from baseProxy %v", v)
+			return err
+		}
+	}
+
+	return nil
+}
+
+func newBaseProxyFromString(connString string, user string, pass string) (*baseProxy, error) {
+	gMetaLogger.Debugf("Entering newBaseProxyFromString()")
+	defer gMetaLogger.Debugf("Leaving newBaseProxyFromString()")
+
+	s1 := strings.Split(connString, "://")
+	if len(s1) != 2 {
+		return nil, fmt.Errorf("wrong connection string format")
+	}
+	prot := s1[0]
+	s2 := s1[1]
+
+	s3 := strings.Split(s2, ":")
+	if len(s3) != 2 {
+		return nil, fmt.Errorf("wrong connection string format")
+	}
+
+	host := s3[0]
+	port := s3[1]
+
+	return &baseProxy{prot: prot, host: host, port: port, user: user, pass: pass}, nil
+}
+
 func newProxy(prot string, host string, port string, user string, pass string) (proxy, error) {
 	switch prot {
 	case "socks5":
-		return socks5{baseProxy{host: host, port: port, user: user, pass: pass}}, nil
-	case "httpconnect":
-		return httpConnect{baseProxy{host: host, port: port, user: user, pass: pass}}, nil
+		return socks5{baseProxy{prot: prot, host: host, port: port, user: user, pass: pass}}, nil
+	case "httpconnect", "http":
+		return httpConnect{baseProxy{prot: prot, host: host, port: port, user: user, pass: pass}}, nil
 	default:
 		err := fmt.Errorf("unknown proxy protocol %v", prot)
 		return nil, err
@@ -45,12 +123,36 @@ type proxyChain struct {
 	proxies           []proxy // ordered list of proxies to connect through
 }
 
+type proxyChainDesc struct {
+	ProxyDns          bool
+	TcpConnectTimeout int64
+	TcpReadTimeout    int64
+	Proxies           []string
+}
+
+func (p *proxyChainDesc) UnmarshalJSON(b []byte) error {
+	type defaults proxyChainDesc
+
+	tmp := defaults{ProxyDns: true, TcpConnectTimeout: 1000, TcpReadTimeout: 2000}
+
+	err := json.Unmarshal(b, &tmp)
+	if err != nil {
+		err = fmt.Errorf("error unmarshalling '%s' in proxyChainDesc : %v", b, err)
+		return err
+	}
+	*p = proxyChainDesc(tmp)
+
+	return nil
+}
+
+type chainMap map[string]proxyChainDesc
+
 // connect takes a destination address string (format host:port) and returns a net.Conn connected to this address through the chain of proxies.
 func (chain proxyChain) connect(ctx context.Context, address string) (net.Conn, string, error) {
 
-	// If a custom hosts file (with the /etc/hosts format) is provided, the matching hostnames are replaced by their hardcoded IP address.
+	// If custom hosts are provided in the hosts section of the configuration, the matching hostnames are replaced by their hardcoded IP address.
 	// This overrides proxyDns: matching hostnames will be replaces by their IP address even if proxyDns=true.
-	if gArgCustomHosts != "" {
+	if len(gHosts) != 0 {
 		host, port, err := net.SplitHostPort(address)
 		if err != nil {
 			werr := fmt.Errorf("could not split host from %v : %w", address, err)

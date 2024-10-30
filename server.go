@@ -3,13 +3,11 @@ package main
 // Defines functions to run the input servers (SOCKS5 and HTTP CONNECT) and to handle incomming client connections.
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"strings"
 	"sync"
 )
@@ -123,37 +121,6 @@ func (server *server) UnmarshalJSON(b []byte) error {
 	server.handler = tmpServer.handler
 
 	return nil
-}
-
-// parseServerConfig parses the JSON servers configuration file at configPath and returns a []server variable representing this configuration.
-// The config file should be a JSON like :
-// [
-//
-//	"socks5://127.0.0.1:1080:table1",
-//	"http://127.0.0.1:8080:table2"
-//
-// ]
-// If PAC is used, the table is ignored and can be set to "pac"
-func parseServerConfig(configPath string) ([]server, error) {
-
-	fileBytes, err := os.ReadFile(configPath)
-	if err != nil {
-		err := fmt.Errorf("error reading file %v : %v", configPath, err)
-		return nil, err
-	}
-
-	var servers []server
-
-	dec := json.NewDecoder(bytes.NewReader(fileBytes))
-	dec.DisallowUnknownFields()
-
-	err = dec.Decode(&servers)
-	if err != nil {
-		err = fmt.Errorf("error unmarshalling server config file : %v", err)
-		return nil, err
-	}
-
-	return servers, nil
 }
 
 func (s server) address() string {
