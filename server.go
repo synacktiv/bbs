@@ -3,11 +3,12 @@ package main
 // Defines functions to run the input servers (SOCKS5 and HTTP CONNECT) and to handle incomming client connections.
 
 import (
-	"bufio"
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net"
-	"net/http"
+	"strings"
 	"sync"
 )
 
@@ -21,339 +22,177 @@ const (
 	cmdUDPAssociate byte = 3 // SOCKS5 request UDP ASSOCIATE command (see RFC 1928)
 )
 
-type ServerType byte
+type connHandler interface {
+	connHandle(client net.Conn, table string, ctx context.Context, cancel context.CancelFunc)
+}
 
-const (
-	HTTPCONNECT ServerType = iota // HTTP CONNECT input server type
-	SOCKS5                        // SOCKS5 input server type
-)
+type server struct {
+	prot    string
+	addr    string
+	port    string
+	table   string
+	handler connHandler
+	ctx     context.Context
+	cancel  context.CancelFunc
+	running bool
+}
+
+// serverConf is the type used to hold and access a server configuration (defined in a file)
+type serverConf struct {
+	servers []server
+	valid   bool // whether the current configuration is valid
+	mu      sync.RWMutex
+}
+
+func newServer(prot string, addr string, port string, table string) (*server, error) {
+	gMetaLogger.Debugf("Entering newServer()")
+	defer gMetaLogger.Debugf("Leaving newServer()")
+
+	var handler connHandler
+
+	switch prot {
+	case "socks5":
+		handler = new(socks5Handler)
+	case "http":
+		handler = new(httpHandler)
+	default:
+		return nil, fmt.Errorf("%v handler type does not exist", prot)
+	}
+
+	s := &server{
+		prot:    prot,
+		addr:    addr,
+		port:    port,
+		table:   table,
+		handler: handler,
+		ctx:     nil,
+		cancel:  nil,
+		running: false,
+	}
+	return s, nil
+}
+
+func newServerFromString(srvString string) (*server, error) {
+	gMetaLogger.Debugf("Entering newServerFromString()")
+	defer gMetaLogger.Debugf("Leaving newServerFromString()")
+
+	s1 := strings.Split(srvString, "://")
+	if len(s1) != 2 {
+		return nil, fmt.Errorf("wrong server string format")
+	}
+	prot := s1[0]
+	s2 := s1[1]
+
+	s3 := strings.Split(s2, ":")
+	if len(s3) != 3 {
+		return nil, fmt.Errorf("wrong server string format")
+	}
+
+	addr := s3[0]
+	port := s3[1]
+	table := s3[2]
+
+	return newServer(prot, addr, port, table)
+}
+
+// Custom JSON unmarshaller describing how to parse a server type from a string like "socsk5://127.0.0.1:1337:table1"
+func (server *server) UnmarshalJSON(b []byte) error {
+
+	var serverString string
+
+	err := json.Unmarshal(b, &serverString)
+	if err != nil {
+		err = fmt.Errorf("error unmarshalling '%s' in string : %v", b, err)
+		return err
+	}
+
+	tmpServer, err := newServerFromString(serverString)
+	if err != nil {
+		err = fmt.Errorf("error creating new server from string: %v", err)
+		return err
+	}
+
+	server.addr = tmpServer.addr
+	server.port = tmpServer.port
+	server.prot = tmpServer.prot
+	server.table = tmpServer.table
+	server.ctx = tmpServer.ctx
+	server.cancel = tmpServer.cancel
+	server.handler = tmpServer.handler
+
+	return nil
+}
+
+func (s server) address() string {
+	return fmt.Sprintf("%s:%s", s.addr, s.port)
+}
+
+func (s server) String() string {
+	return fmt.Sprintf("%s://%s:%s:%s[running:%v, handler:%v]", s.prot, s.addr, s.port, s.table, s.running, s.handler)
+}
 
 // run runs an input server of type serverType listening on address
-func run(address string, serverType ServerType) {
+func (s *server) run() {
+	gMetaLogger.Debugf("Entering %v(%p).run()", s, s)
+	defer gMetaLogger.Debugf("Leaving %v(%p).run()", s, s)
+
+	// Create a new context and store it in the server struct
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.ctx = ctx
+	s.cancel = cancel
+	s.running = true
 
 	// Creates a TCP socket and listen on address for incomming client connections
-	l, err := net.Listen("tcp", address)
+	l, err := net.Listen("tcp", s.address())
 	if err != nil {
 		gMetaLogger.Panic(err)
 	}
-	gMetaLogger.Infof("Listener started on %v", address)
+	defer l.Close()
+	gMetaLogger.Infof("connHandler started on %v", s.address())
 
 	// For each client connection received on the listening socket, create a context and start a goroutine handling the connection
 	for {
-		var c net.Conn
-		c, err = l.Accept()
-		if err != nil {
-			gMetaLogger.Error(err)
+		acceptDone := make(chan struct{})
+		go func() {
+			var c net.Conn
+			c, err = l.Accept()
+			if err != nil {
+				gMetaLogger.Error(err)
+				close(acceptDone)
+				return
+			}
+			gMetaLogger.Debugf("new connection (%v) accepted", c)
+
+			ctx, cancel := context.WithCancel(s.ctx)
+
+			go s.handler.connHandle(c, s.table, ctx, cancel)
+			close(acceptDone)
+		}()
+
+		select {
+		case <-s.ctx.Done():
+			return //causes l to be closed (see defer upper) and thus the last running Accept goroutine to return.
+		case <-acceptDone:
 			continue
 		}
-		gMetaLogger.Debugf("new connection (%v) accepted", c)
-
-		ctx, cancel := context.WithCancel(context.Background())
-
-		switch serverType {
-		case HTTPCONNECT:
-			go handleHttpCONNECTConnection(c, ctx, cancel)
-		case SOCKS5:
-			go handleSOCKSConnection(c, ctx, cancel)
-		}
-
 	}
 }
 
-// handleSOCKSConnection handles the connection of a client on the input SOCKS5 listener.
-// It parses the SOCKS command, establishes a connection to the requested host through the right chain,
-// transfers data between the established connecion socket and the clien socket, and finally closes evetything on errors or at the end.
-func handleSOCKSConnection(client net.Conn, ctx context.Context, cancel context.CancelFunc) {
-	gMetaLogger.Debugf("Entering handleConnection for connection %v", &client)
-	defer func() { gMetaLogger.Debugf("Leavings handleConnection for connection %v", &client) }()
+func (s *server) stop() {
+	gMetaLogger.Debugf("Entering %v.stop()", s)
+	defer gMetaLogger.Debugf("Leaving %v.stop()", s)
 
-	defer client.Close()
-
-	// ***** BEGIN SOCKS5 input parsing *****
-
-	// Parse SOCKS5 input to retrieve command, target host and target port (see RFC 1928)
-
-	reader := bufio.NewReader(client)
-
-	// Read version and number of methods
-	buff := make([]byte, 2)
-	_, err := io.ReadFull(reader, buff)
-	if err != nil {
-		gMetaLogger.Errorf("could not read on client socket: %v", err)
-		return
+	if s.running {
+		gMetaLogger.Debugf("%v server is running, stopping it.", s)
+		s.cancel()
+		s.running = false
 	}
-
-	if buff[0] != 5 {
-		gMetaLogger.Error("only SOCKS5 is supported")
-		return
-	}
-
-	gMetaLogger.Debugf("received SOCKS %v connection with %v proposed methods", buff[0], buff[1])
-
-	// Read methods
-	buff = make([]byte, buff[1])
-	_, err = io.ReadFull(reader, buff)
-	if err != nil {
-		gMetaLogger.Errorf("could not read on client socket: %v", err)
-		return
-	}
-	gMetaLogger.Debugf("Following methods are proposed: %v", buff)
-
-	method := byte(255)
-	for _, m := range buff {
-		if m == 0 {
-			method = 0
-		}
-	}
-
-	if method == 255 {
-		gMetaLogger.Error("no accepted methods proposed by the client")
-		return
-	}
-
-	// Send selected method
-	_, err = client.Write([]byte{5, method})
-	if err != nil {
-		gMetaLogger.Error(err)
-		return
-	}
-	gMetaLogger.Debugf("sending SOCKS answer, accepting method %v", method)
-
-	// Read version, cmd, rsv and atyp
-	buff = make([]byte, 4)
-	_, err = io.ReadFull(reader, buff)
-	if err != nil {
-		gMetaLogger.Error(err)
-		return
-	}
-
-	cmd := buff[1]
-	atyp := buff[3]
-
-	// Only connect command is supported
-	if cmd != cmdConnect {
-		gMetaLogger.Errorf("only CONNECT (0x01) SOCKS command is supported, not 0x0%v", cmd)
-		client.Write([]byte{5, 7})
-		return
-	}
-
-	addr, err := addrToString(reader, atyp)
-	if err != nil {
-		gMetaLogger.Error(err)
-		client.Write([]byte{5, 1})
-		return
-	}
-
-	gMetaLogger.Debugf("received SOCKS CMD packet : cmd=%v - atype=%v - addr=%s\n", cmd, atyp, addr)
-
-	// ***** END SOCKS5 input parsing *****
-
-	// ***** BEGIN Routing decision *****
-
-	// Decide which chain to use based on the target address
-
-	var chainStr string
-
-	if gArgPACPath != "" {
-		// -pac flag defined, use PAC to find the chain
-		chainStr, err = getRouteWithPAC(addr)
-
-		if err != nil {
-			gMetaLogger.Errorf("error getting route PAC: %v", err)
-			client.Write([]byte{5, 1})
-			return
-		}
-
-	} else {
-		// use JSON config to find the chain
-		gRoutingConf.mu.RLock()
-		chainStr, err = gRoutingConf.routing.getRoute(addr)
-		gRoutingConf.mu.RUnlock()
-
-		if err != nil {
-			gMetaLogger.Errorf("error getting route with JSON conf: %v", err)
-			client.Write([]byte{5, 1})
-			return
-		}
-	}
-
-	gMetaLogger.Debugf("chain to use for %v: %v\n", addr, chainStr)
-
-	if chainStr == "drop" {
-		gMetaLogger.Debugf("dropping connection to %v", addr)
-		gMetaLogger.Auditf("| DROPPED\t| %v\t| %v\t| %v\n", &client, chainStr, addr)
-		client.Write([]byte{5, 2})
-		return
-	}
-
-	gChainsConf.mu.RLock()
-	chain, ok := gChainsConf.proxychains[chainStr]
-	gChainsConf.mu.RUnlock()
-
-	if !ok {
-		gMetaLogger.Errorf("chain '%v' is not declared in configuration", chainStr)
-		client.Write([]byte{5, 1})
-		return
-	}
-
-	// ***** END Routing decision *****
-
-	// ***** BEGIN Connection to target host  *****
-
-	//Connect to chain
-	target, chainRepresentation, err := chain.connect(addr)
-
-	if err != nil {
-		gMetaLogger.Error(err)
-		gMetaLogger.Auditf("| ERROR\t| %v\t| %v\t| %v\t| %v\n", &client, chainStr, addr, chainRepresentation)
-		client.Write([]byte{5, 1})
-		return
-	}
-	defer target.Close()
-
-	gMetaLogger.Debugf("Client %v connected to host %v through chain %v", client, addr, chainStr)
-
-	// Create auditing trace for connection opening and defering closing trace
-
-	gMetaLogger.Auditf("| OPEN\t| %v\t| %v\t| %v\t| %v\n", &client, chainStr, addr, chainRepresentation)
-	defer gMetaLogger.Auditf("| CLOSE\t| %v\t| %v\t| %v\t| %v\n", &client, chainStr, addr, chainRepresentation)
-
-	//Terminate SOCKS5 handshake with client
-	_, err = client.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0})
-	if err != nil {
-		gMetaLogger.Error(err)
-		return
-	}
-	gMetaLogger.Debugf("sent SOCKS success response")
-
-	// ***** END Connection to target host  *****
-
-	relay(client, target)
-
 }
 
-// handleHttpCONNECTConnection handles the connection of a client on the input HTTP CONNECT listener.
-// It parses the CONNECT request, establishes a connection to the requested host through the right chain,
-// transfers data between the established connecion socket and the clien socket, and finally closes evetything on errors or at the end.
-func handleHttpCONNECTConnection(client net.Conn, ctx context.Context, cancel context.CancelFunc) {
-	//debug
-	gMetaLogger.Debugf("Entering handleHttpCONNNECTConnection for connection %v", &client)
-	defer func() { gMetaLogger.Debugf("Leaving handleHttpCONNNECTConnection for connection %v", &client) }()
-
-	defer client.Close()
-
-	// ***** BEGIN HTTP CONNECT input parsing *****
-
-	// Parse CONNECT request to retrieve target host and target port
-
-	reader := bufio.NewReader(client)
-
-	request, err := http.ReadRequest(reader)
-
-	if err != nil {
-		gMetaLogger.Error(err)
-		return
-	}
-
-	gMetaLogger.Debug(request)
-	gMetaLogger.Debugf("METHOD: %v\nURL: %v", request.Method, request.URL.Host)
-
-	if request.Method != "CONNECT" {
-		gMetaLogger.Errorf("only HTTP CONNECT method is supported")
-		(&http.Response{StatusCode: 405, ProtoMajor: 1}).Write(client)
-		return
-	}
-
-	if request.Host != request.URL.Host {
-		gMetaLogger.Error("host and URL do not match")
-		(&http.Response{StatusCode: 400, ProtoMajor: 1}).Write(client)
-		return
-	}
-
-	addr := request.Host
-
-	// ***** END HTTP CONNECT input parsing *****
-
-	// ***** BEGIN Routing decision *****
-
-	var chainStr string
-
-	if gArgPACPath != "" {
-		// -pac flag defined, use PAC to find the chain
-		chainStr, err = getRouteWithPAC(addr)
-
-		if err != nil {
-			gMetaLogger.Errorf("error getting route PAC: %v", err)
-			(&http.Response{StatusCode: 400, ProtoMajor: 1}).Write(client)
-			return
-		}
-
-	} else {
-		// use JSON config to find the chain
-		gRoutingConf.mu.RLock()
-		chainStr, err = gRoutingConf.routing.getRoute(addr)
-		gRoutingConf.mu.RUnlock()
-
-		if err != nil {
-			gMetaLogger.Errorf("error getting route with JSON conf: %v", err)
-			(&http.Response{StatusCode: 400, ProtoMajor: 1}).Write(client)
-			return
-		}
-	}
-
-	gMetaLogger.Debugf("chain to use for %v: %v\n", addr, chainStr)
-
-	if chainStr == "drop" {
-		gMetaLogger.Debugf("dropping connection to %v", addr)
-		gMetaLogger.Auditf("| DROPPED\t| %v\t| %v\t| %v\n", &client, chainStr, addr)
-		(&http.Response{StatusCode: 403, ProtoMajor: 1}).Write(client)
-		return
-	}
-
-	gChainsConf.mu.RLock()
-	chain, ok := gChainsConf.proxychains[chainStr]
-	gChainsConf.mu.RUnlock()
-
-	if !ok {
-		gMetaLogger.Errorf("chain '%v' returned by PAC script is not declared in configuration", chainStr)
-		(&http.Response{StatusCode: 500, ProtoMajor: 1}).Write(client)
-		return
-	}
-
-	// ***** END Routing decision *****
-
-	// ***** BEGIN Connection to target host  *****
-
-	//Connect to chain
-	target, chainRepresentation, err := chain.connect(addr)
-
-	if err != nil {
-		gMetaLogger.Error(err)
-		gMetaLogger.Auditf("| ERROR\t| %v\t| %v\t| %v\t| %v\n", &client, chainStr, addr, chainRepresentation)
-		(&http.Response{StatusCode: 502, ProtoMajor: 1}).Write(client)
-		return
-	}
-	defer target.Close()
-
-	gMetaLogger.Debugf("Client %v connected to host %v through chain %v", client, addr, chainStr)
-
-	// Create auditing trace for connection opening and defering closing trace
-	gMetaLogger.Auditf("| OPEN\t| %v\t| %v\t| %v\t| %v\n", &client, chainStr, addr, chainRepresentation)
-	defer gMetaLogger.Auditf("| CLOSE\t| %v\t| %v\t| %v\t| %v\n", &client, chainStr, addr, chainRepresentation)
-
-	// Send HTTP Success
-
-	err = (&http.Response{StatusCode: 200, ProtoMajor: 1}).Write(client)
-	if err != nil {
-		gMetaLogger.Error(err)
-		return
-	}
-	gMetaLogger.Debugf("sent HTTP success response")
-
-	// ***** END Connection to target host  *****
-
-	relay(client, target)
-
+func compare(s1 server, s2 server) (equal bool) {
+	equal = ((s1.addr == s2.addr) && (s1.port == s2.port) && (s1.prot == s2.prot) && (s1.table == s2.table))
+	return
 }
 
 // relay takes two net.Conn target and client (representing TCP sockets) and transfers data between them.
@@ -391,8 +230,15 @@ func relay(client net.Conn, target net.Conn) {
 		}
 	}()
 
-	gMetaLogger.Debug("Waiting for both goroutines to complete")
+	gMetaLogger.Debug("Waiting for both relay goroutines to complete")
 	wg.Wait()
-	gMetaLogger.Debug("Goroutines ended")
+	gMetaLogger.Debug("Relay goroutines ended")
 
+}
+
+func describeServers(servers []server) {
+	gMetaLogger.Debugf("Describing server slice %p : %v", servers, servers)
+	for i := 0; i < len(servers); i++ {
+		gMetaLogger.Debugf("Index %v. Server %p : %v", i, &(servers[i]), servers[i])
+	}
 }

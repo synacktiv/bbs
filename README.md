@@ -1,9 +1,11 @@
 # BBS
 
+The old `bbs` can be found [here](https://github.com/synacktiv/bbs/tree/v1.0)
+
 ## Description
 
-`bbs` is a router for SOCKS and HTTP proxies. It exposes a SOCKS5 (or HTTP
-CONNECT) service and forwards incoming requests to proxies or chains of proxies
+`bbs` is a router for SOCKS and HTTP proxies. It exposes SOCKS5 or HTTP
+CONNECT services and forwards incoming requests to proxies or chains of proxies
 based on the request's target. Routing can be configured with a PAC script (if
 built with PAC support), or through a JSON file.
 
@@ -23,57 +25,30 @@ Note: PAC relies on unaudited third-party libraries.
 
 ## Configuration
 
-Configuration is performed through 2 files:
+Configuration is performed in one JSON file composed of multiple sections:
 
-- Routing rules (PAC script or JSON file)
-- Proxies and chains parameters (JSON file)
+- Proxies: defines all the upstream proxies used by bbs
+- Chains: defines the differents chains of previously defined proxies, and their settings
+- Routes: defines the different routing tables 
+- Servers: defines the listeners (SOCKS5 or HTTP) opened by bbs
+- Hosts: defines custom hosts resolution (in a /etc/hosts way)
 
+
+The configuration file path is provided through argument `-c <path>` (default to `./bbs.json`).
 `bbs` reloads configuration files on SIGHUP, use `kill -HUP <pid>` to reload.
 
-
-### Proxies and chains JSON configuration
-
-Upstream proxies and chains must be declared in a JSON configuration file
-(`bbs.json` by default, or `-c <path>`). The file should follow the structure
-from the provided example.
-
-For proxies:
-
-- `prot`, `host` and `port` are required
-- `user` and `pass` are optional
-- `prot` can be `socks5` or `httpconnect`
-
-Chains have proxychains-like parameters (cf.
-https://github.com/rofl0r/proxychains-ng). The `proxies` key of a `chain` must
-contain an array of proxy names declared as keys in the `proxies` section.
-
-The `routing` blocks of the JSON file or the PAC function must return declared
-chain names, not proxy names. If you want to use a single proxy, you must wrap
-it in a chain. The `drop` name is special and does not need to be declared in
-this configuration. If the PAC function or a routing block returns `drop` as a
-chain name, then the connection is dropped.
-
-Configuration example: 
+Here is an example of such configuration:
 
 ```json
 {
   "proxies": {
     "proxy1": {
-      "prot": "socks5",
-      "host": "127.0.0.1",
-      "port": "1337"
+      "connstring": "socks5://127.0.0.1:1337",
+      "user": "user",
+      "pass": "s3cr3t"
     },
     "proxy2": {
-      "prot": "socks5",
-      "host": "127.0.0.1",
-      "port": "1338"
-    },
-    "proxy3": {
-      "prot": "httpconnect",
-      "host": "127.0.0.1",
-      "port": "8080",
-      "user": "foo",
-      "pass": "bar"
+      "connstring": "http://127.0.0.1:1338"
     }
   },
   "chains": {
@@ -86,84 +61,123 @@ Configuration example:
         "proxy2"
       ]
     },
-    "chain2": {
-      "proxies": [
-        "proxy1"
-      ]
-    },
     "direct": {
       "proxies": []
     }
+  },
+  "routes": {
+    "table1": [
+      {
+        "comment": "Block1 comment",
+        "rules": {
+          "rule": "regexp",
+          "variable": "host",
+          "content": "me\\.gandi\\.net"
+        },
+        "route": "chain1"
+      },
+      {
+        "comment": "Route web traffic towards 10.35.0.0/16 through chain1",
+        "rules": {
+          "rule1": {
+            "rule": "subnet",
+            "content": "10.35.0.0/16"
+          },
+          "op": "AND",
+          "rule2": {
+            "rule": "regexp",
+            "variable": "port",
+            "content": "^(80|443)$"
+          }
+        },
+        "route": "chain1"
+      },
+      {
+        "comment": "Drop traffic to 445",
+        "rules": {
+          "rule": "regexp",
+          "variable": "port",
+          "content": "^445$"
+        },
+        "route": "drop"
+      },
+      {
+        "comment": "Route *.corp.local through chain2",
+        "rules": {
+          "rule": "regexp",
+          "variable": "host",
+          "content": "(?i)^(.*\\.)?corp\\.local$"
+        },
+        "route": "chain1"
+      },
+      {
+        "comment": "Default routing through direct chain",
+        "rules": {
+          "rule": "true"
+        },
+        "route": "direct"
+      }
+    ],
+    "table2": [
+      {
+        "comment": "Default routing through chain1",
+        "rules": {
+          "rule": "true"
+        },
+        "route": "chain1"
+      }
+    ]
+  },
+  "servers": [
+    "socks5://127.0.0.1:1081:table1",
+    "http://127.0.0.1:1080:table2"
+  ],
+  "hosts": {
+    "host1": "1.1.1.1",
+    "host2": "10.0.0.1"
   }
 }
 ```
 
-### Routing JSON configuration
+### Proxies 
 
-The built-in configuration mode for routing is a JSON file. It associates
-addresses with chain names. The file must contain an array of rule blocks. Each
+Upstream proxies must be declared in the `proxies` section as a map of proxy
+structures. Map keys are chosen freely but must match the ones used in chains 
+definition. Proxy structures are like this:
+
+- `connstring` is required with format `protocol://host:port` (`protocol` can be `socks5` or `httpconnect`/`http`)
+- `user` and `pass` are optional
+
+
+### Chains
+
+Chains must be declared in the `chains` section as a map of chain structures.
+Map keys are chosen freely by must match with the ones used in routes definition.
+Chain structures have proxychains-like parameters (cf. https://github.com/rofl0r/proxychains-ng):
+
+- `proxyDns`: boolean, optional, defaults to `true`
+- `tcpConnectTimeout`: integer, optional, defaults to 1000
+- `tcpReadTimeout`: integer, optional, defaults to 2000
+- `proxies`: string list, optional, defaults to empty list
+
+The `proxies` key of a `chain` must contain an array of proxy names declared as keys in the `proxies` section.
+
+
+
+### Routes
+
+The built-in configuration mode for routing is through the configuration file. It associates
+addresses with chain names. The file must contain a map of routing tables. Map keys
+are chosen freely but must match the ones used in the `servers` section. 
+Each routing table is an array of rule blocks. Each
 rule block contains a `comment`, a set of `rules`, and an associated chain
 name. Rules are evaluated: given an address in the `host:port` format, they can
 be `true` or `false`. For a given address, blocks are evaluated in their
 declaration order. The evaluation stops at the first block that is `true` and
-the associated chain name is returned.
+the associated chain name is returned. Each opened server (from `servers` section)
+is associated with one routing table from the configuration. Requests received on 
+each server are routed according to the matching routing table.
 
-Here is an example configuration:
-
-```json
-[
-  {
-    "comment": "Block1 comment",
-    "rules": {
-      "rule": "regexp",
-      "variable": "host",
-      "content": "me\\.gandi\\.net"
-    },
-    "route": "chain2"
-  },
-  {
-    "comment": "Route *.corp.local through chain2",
-    "rules": {
-      "rule": "regexp",
-      "variable": "host",
-      "content": "(?i)^(.*\\.)?corp\\.local$"
-    },
-    "route": "chain2"
-  },
-  {
-    "comment": "Route web traffic towards 10.35.0.0/16 through chain1",
-    "rules": {
-      "rule1": {
-        "rule": "subnet",
-        "content": "10.35.0.0/16"
-      },
-      "op": "AND",
-      "rule2": {
-        "rule": "regexp",
-        "variable": "port",
-        "content": "^(80|443)$"
-      }
-    },
-    "route": "chain1"
-  },
-  {
-    "comment": "Drop traffic to 445",
-    "rules": {
-      "rule": "regexp",
-      "variable": "port",
-      "content": "^445$"
-    },
-    "route": "drop"
-  },
-  {
-    "comment": "Default routing through direct chain",
-    "rules": {
-      "rule": "true"
-    },
-    "route": "direct"
-  }
-]
-```
 
 Block fields:
  - `comment` (string)
@@ -186,36 +200,38 @@ Rule types:
  - `subnet`: checks if host is in the subnet defined in `content`. If host is a domain name and not a subnet address, the rule returns false.
  - `true`: returns `true` for every address. Useful for default routing at the end of the block array.
 
-The path of the routing configuration can be set with the `-routes` flag. If
-bbs is built without PAC support, `-routes` default value is `routes.json`. If
-bbs is built with PAC support, `-routes` has no default value and must be
-explicitly defined in order to use a JSON file for routing (note that with PAC
-support, `-routes` and `-pac` are mutually exclusive and collectively
-exhaustive)
+The rule blocks from `routes` section or the PAC function must return declared
+chain names, not proxy names. If you want to use a single proxy, you must wrap
+it in a chain. The `drop` name is special and does not need to be declared in
+this configuration. If the PAC function or a routing block returns `drop` as a
+chain name, then the connection is dropped.
 
+If bbs is built with PAC support and `-pac` arguments points to a PAC file, routes
+defined in the configuration file will not be used. PAC file routing does not support
+multiple routing tables. The same PAC file will be used for every opened server.
+
+
+### Servers
+
+The listeners opened by bbs must be declared in the `servers` section as a list of 
+connection strings of format `protocol://bind_addr:bind_port:routing_table`.
+
+- `protocol` can be `http` or `socks5`
+- `routing_table` must match one of the tables defined in `routes` section
+
+
+### Hosts
+
+Custom host resolution (similar to `/etc/hosts`) can be configured in the
+`hosts` section as a map of strings. Map keys correspond to the hostname
+and the values to the IP address the host should resolve to.
 
 ### PAC script
 
 If `bbs` is built with PAC support, routing can be configured with a PAC script
 instead of a JSON configuration file. However, this requires using an untrusted
-Go library. The PAC file path must be provided with `-pac`. At least one of
-`-pac` and `-routes` argument (but not both) must be provided.
+Go library. The PAC file path must be provided with `-pac`. 
 
 The PAC script must define the `FindProxyForURL(url, host)` function. The
 values returned by this function must match the names of the chains (not the
 proxies) declared in the JSON configuration. 
-
-
-### Custom host resolution
-
-Custom host resolution (similar to `/etc/hosts`) can be configured in a JSON
-file. The path to the file must be passed in `-custom-hosts`. The file must
-have the following format: 
-
-```json
-{
-  "host1.domain.com": "10.0.0.1",
-  "host2": "192.0.0.1",
-  "host3": "127.0.0.1"
-}
-```

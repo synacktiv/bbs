@@ -1,5 +1,5 @@
 [Path]
-PathModified=%h/.config/bbs
+PathModified=%h/.config/bbs/bbs.json
 
 [Install]
 WantedBy=default.target

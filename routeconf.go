@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"os"
 	"regexp"
 	"sync"
 )
@@ -19,8 +18,10 @@ type routingConf struct {
 	mu      sync.RWMutex
 }
 
+type routing map[string]routingTable
+
 // Holds the ordered list of rule blocks that constitutes the core of the routing model. See README.md#Configuration##routing JSON configuration
-type routing []ruleBlock
+type routingTable []ruleBlock
 
 // Maps the JSON fields described in README.md#Configuration##Routing JSON configuration
 type ruleBlock struct {
@@ -252,9 +253,9 @@ func (rBlock *ruleBlock) UnmarshalJSON(b []byte) error {
 }
 
 // getRoute returns in route the chain to use for a given destination address string addr.
-// For each RuleBlock of the routing configuration, it evaluates addr against the rules and stops at the first evaluation returning true.
-func (routingConf routing) getRoute(addr string) (route string, err error) {
-	for _, rBlock := range routingConf {
+// For each RuleBlock of the routing table, it evaluates addr against the rules and stops at the first evaluation returning true.
+func (table routingTable) getRoute(addr string) (route string, err error) {
+	for _, rBlock := range table {
 		matched, err := rBlock.Rules.evaluate(addr)
 		if err != nil {
 			err = fmt.Errorf("error evaluating %v : %v", rBlock.Rules, err)
@@ -267,27 +268,4 @@ func (routingConf routing) getRoute(addr string) (route string, err error) {
 	}
 	err = fmt.Errorf("all blocks evaluated to false for %v", addr)
 	return "", err
-}
-
-// parseRoutingConfig parses the JSON routing configuration file at configPath and returns a Routing variable representing this configuration.
-func parseRoutingConfig(configPath string) (routing, error) {
-
-	fileBytes, err := os.ReadFile(configPath)
-	if err != nil {
-		err := fmt.Errorf("error reading file %v : %v", configPath, err)
-		return nil, err
-	}
-
-	var routingConfig routing
-
-	dec := json.NewDecoder(bytes.NewReader(fileBytes))
-	dec.DisallowUnknownFields()
-
-	err = dec.Decode(&routingConfig)
-	if err != nil {
-		err = fmt.Errorf("error unmarshalling routing config file : %v", err)
-		return nil, err
-	}
-
-	return routingConfig, nil
 }
