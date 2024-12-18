@@ -1,5 +1,7 @@
 # BBS
 
+The old `bbs` can be found [here](https://github.com/synacktiv/bbs/tree/v1.0)
+
 ## Description
 
 `bbs` is a router for SOCKS and HTTP proxies. It exposes SOCKS5 or HTTP
