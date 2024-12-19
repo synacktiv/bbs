@@ -110,9 +110,32 @@ func main() {
 			gMetaLogger.Errorf("error parsing main config : %v", err)
 			continue
 		}
-		gMetaLogger.Debugf("Successfully parsed main config : %v", config)
+		gMetaLogger.Info("JSON configuration file parsed. Checking for errors.")
+		gMetaLogger.Debugf("Parsed main config : %v", config)
 
-		// Check that all proxies used in all chains fo chains section correspond to an existing proxy in the proxies section
+		// Create the implicit single proxy chains associated with each declared proxy
+		duplicateName := false
+		definedChains := slices.Collect(maps.Keys(config.Chains))
+		for proxyName, _ := range config.Proxies {
+			if slices.Contains(definedChains, proxyName) {
+				gMetaLogger.Errorf("chain %v cannot be named as proxy %v", proxyName, proxyName)
+				duplicateName = true
+				break
+			}
+
+			var implicitChain proxyChainDesc
+			implicitChain.ProxyDns = true
+			implicitChain.TcpConnectTimeout = 1000
+			implicitChain.TcpReadTimeout = 2000
+			implicitChain.Proxies = []string{proxyName}
+
+			config.Chains[proxyName] = implicitChain
+		}
+		if duplicateName {
+			continue
+		}
+
+		// Check that all proxies used in all chains of chains section correspond to an existing proxy in the proxies section
 		allExist := true
 		definedProxies := slices.Collect(maps.Keys(config.Proxies))
 		for chainName, chainDesc := range config.Chains {
@@ -169,6 +192,7 @@ func main() {
 		}
 
 		// At this point, the defined configuration should be consistent, so we can update the globals
+		gMetaLogger.Info("No errors detected. Updating global configurations.")
 
 		// Build a proxyChain object from the proxyChainDesc parsed in JSON file
 
@@ -192,9 +216,11 @@ func main() {
 		gChainsConf.valid = true
 		gChainsConf.mu.Unlock()
 		gMetaLogger.Info("Global chains configuration updated")
+		gMetaLogger.Debugf("-> %v", gChainsConf.proxychains)
 
 		gHosts = config.Hosts
 		gMetaLogger.Info("Global hosts configuration updated")
+		gMetaLogger.Debugf("-> %v", gHosts)
 
 		if gArgPACPath == "" {
 			gRoutingConf.mu.Lock()
@@ -202,7 +228,7 @@ func main() {
 			gRoutingConf.valid = true
 			gRoutingConf.mu.Unlock()
 			gMetaLogger.Info("Global routing configuration updated")
-			gMetaLogger.Debugf("routing config: %v", config.Routes)
+			gMetaLogger.Debugf("-> %v", gRoutingConf.routing)
 		}
 
 		// Update global servers variable, stop old ones and start new ones
