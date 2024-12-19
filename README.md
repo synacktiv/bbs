@@ -180,7 +180,9 @@ Each routing table is an array of rule blocks. Each
 rule block contains a `comment`, a set of `rules`, and an associated chain
 name. Rules are evaluated: given an address in the `host:port` format, they can
 be `true` or `false`. For a given address, blocks are evaluated in their
-declaration order. The evaluation stops at the first block that is `true` and
+declaration order. Blocks can be disabled by setting the `disable` field to `true`.
+This allows for a form of "commenting", which is not possible in JSON.
+The evaluation stops at the first block that is `true` and
 the associated chain name is returned. Each opened server (from `servers` section)
 is associated with one routing table from the configuration. Requests received on 
 each server are routed according to the matching routing table.
@@ -190,6 +192,7 @@ Block fields:
  - `comment` (string)
  - `rules` (Rule or RuleCombo)
  - `route` (string)
+ - `disable` (bool)
 
 Rule fields: 
  - `rule` (string): rule type, `regexp`, `subnet` or `true`.
