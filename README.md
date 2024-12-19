@@ -90,7 +90,7 @@ Here is an example of such configuration:
             "content": "^(80|443)$"
           }
         },
-        "route": "chain1"
+        "route": "proxy2"
       },
       {
         "comment": "Drop traffic to 445",
@@ -148,11 +148,15 @@ definition. Proxy structures are like this:
 - `connstring` is required with format `protocol://host:port` (`protocol` can be `socks5` or `httpconnect`/`http`)
 - `user` and `pass` are optional
 
+For each proxy declared, an implicit chain (see next paragraph) is created with 
+the same name. It has default parameters and is composed of the single associated
+proxy. If you want to use non-default parameters, you must explicitely create a chain.
 
 ### Chains
 
 Chains must be declared in the `chains` section as a map of chain structures.
-Map keys are chosen freely by must match with the ones used in routes definition.
+Map keys are chosen freely by must match with the ones used in routes definition, and 
+must be different than the `proxies` section map keys.
 Chain structures have proxychains-like parameters (cf. https://github.com/rofl0r/proxychains-ng):
 
 - `proxyDns`: boolean, optional, defaults to `true`
@@ -161,6 +165,9 @@ Chain structures have proxychains-like parameters (cf. https://github.com/rofl0r
 - `proxies`: string list, optional, defaults to empty list
 
 The `proxies` key of a `chain` must contain an array of proxy names declared as keys in the `proxies` section.
+As mentionned in the previous paragraph, for each proxy declared in `proxies` section, an implicit
+chain (see next paragraph) is created with the same name. It has defaults parameters and is 
+composed of the single associated proxy.
 
 
 
