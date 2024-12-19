@@ -28,6 +28,7 @@ type ruleBlock struct {
 	Comment string
 	Rules   evaluater
 	Route   string
+	Disable bool
 }
 
 // Maps the JSON fields described in README.md#Configuration##Routing JSON configuration
@@ -210,6 +211,7 @@ func (rBlock *ruleBlock) UnmarshalJSON(b []byte) error {
 		Comment string
 		Rules   json.RawMessage
 		Route   string
+		Disable bool
 	}
 
 	var tmp tmpBlock
@@ -224,6 +226,7 @@ func (rBlock *ruleBlock) UnmarshalJSON(b []byte) error {
 
 	rBlock.Comment = tmp.Comment
 	rBlock.Route = tmp.Route
+	rBlock.Disable = tmp.Disable
 
 	//Try to unmarshal Rules rawmessage into a Rule, if it fails, try into a RuleCombo
 	var rule rule
@@ -249,6 +252,32 @@ func (rBlock *ruleBlock) UnmarshalJSON(b []byte) error {
 		//Rules is a RuleCombo
 		rBlock.Rules = rc
 	}
+	return nil
+}
+
+// Custom JSON unmarshaller describing how to parse a routingTable type
+func (rTable *routingTable) UnmarshalJSON(b []byte) error {
+
+	// First, parse all the blocks in the table
+	type tmpTable []ruleBlock
+
+	var tmp tmpTable
+
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	err := dec.Decode(&tmp)
+	if err != nil {
+		err = fmt.Errorf("error unmarshalling '%s' in tmpTable : %v", b, err)
+		return err
+	}
+
+	// Then, only keep the blocks that are not disabled (with the '"disable": true' json field)
+	for _, block := range tmp {
+		if !block.Disable {
+			*rTable = append(*rTable, block)
+		}
+	}
+
 	return nil
 }
 

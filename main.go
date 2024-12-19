@@ -112,7 +112,7 @@ func main() {
 		}
 		gMetaLogger.Debugf("Successfully parsed main config : %v", config)
 
-		// Check that all proxies used in all chains fo chains section correspond to an existing proxy in the proxies section
+		// Check that all proxies used in all chains of chains section correspond to an existing proxy in the proxies section
 		allExist := true
 		definedProxies := slices.Collect(maps.Keys(config.Proxies))
 		for chainName, chainDesc := range config.Chains {
