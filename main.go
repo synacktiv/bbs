@@ -268,8 +268,8 @@ func main() {
 		for i := 0; i < len(gServerConf.servers); i++ {
 			if !gServerConf.servers[i].running {
 				gMetaLogger.Debugf("myServer %v(%p) is not running, running it", gServerConf.servers[i], &gServerConf.servers[i])
-				go (gServerConf.servers[i]).run()
 				time.Sleep(1 * time.Second)
+				go (gServerConf.servers[i]).run()
 				gMetaLogger.Debugf("myServer %v(%p) is running", gServerConf.servers[i], &gServerConf.servers[i])
 			}
 		}
