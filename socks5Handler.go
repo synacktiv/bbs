@@ -13,8 +13,10 @@ type socks5Handler struct{}
 // It parses the SOCKS command, establishes a connection to the requested host through the right chain (found in routingtable table),
 // transfers data between the established connecion socket and the clien socket, and finally closes evetything on errors or at the end.
 func (h socks5Handler) connHandle(client net.Conn, table string, ctx context.Context, cancel context.CancelFunc) {
-	gMetaLogger.Debugf("Entering socks5Handler connHandle for connection %v", &client)
-	defer func() { gMetaLogger.Debugf("Leavings socks5Handler connHandle for connection %v", &client) }()
+	gMetaLogger.Debugf("Entering socks5Handler connHandle for connection (c[%%+v]: %+v, c(%%p): %p &c(%%v): %v) accepted", client, client, &client)
+	defer func() {
+		gMetaLogger.Debugf("Leavings socks5Handler connHandle for connection(c[%%+v]: %+v, c(%%p): %p &c(%%v): %v) accepted", client, client, &client)
+	}()
 
 	defer client.Close()
 
@@ -137,7 +139,7 @@ func (h socks5Handler) connHandle(client net.Conn, table string, ctx context.Con
 
 	if chainStr == "drop" {
 		gMetaLogger.Debugf("dropping connection to %v", addr)
-		gMetaLogger.Auditf("| DROPPED\t| %v\t| %v\t| %v\n", &client, chainStr, addr)
+		gMetaLogger.Auditf("| DROPPED\t| %v\t| %v\t| %v\n", client, chainStr, addr)
 		client.Write([]byte{5, 2})
 		return
 	}
@@ -161,7 +163,7 @@ func (h socks5Handler) connHandle(client net.Conn, table string, ctx context.Con
 
 	if err != nil {
 		gMetaLogger.Error(err)
-		gMetaLogger.Auditf("| ERROR\t| %v\t| %v\t| %v\t| %v\n", &client, chainStr, addr, chainRepresentation)
+		gMetaLogger.Auditf("| ERROR\t| %v\t| %v\t| %v\t| %v\n", client, chainStr, addr, chainRepresentation)
 		client.Write([]byte{5, 1})
 		return
 	}
@@ -171,8 +173,8 @@ func (h socks5Handler) connHandle(client net.Conn, table string, ctx context.Con
 
 	// Create auditing trace for connection opening and defering closing trace
 
-	gMetaLogger.Auditf("| OPEN\t| %v\t| %v\t| %v\t| %v\n", &client, chainStr, addr, chainRepresentation)
-	defer gMetaLogger.Auditf("| CLOSE\t| %v\t| %v\t| %v\t| %v\n", &client, chainStr, addr, chainRepresentation)
+	gMetaLogger.Auditf("| OPEN\t| %v\t| %v\t| %v\t| %v\n", client, chainStr, addr, chainRepresentation)
+	defer gMetaLogger.Auditf("| CLOSE\t| %v\t| %v\t| %v\t| %v\n", client, chainStr, addr, chainRepresentation)
 
 	//Terminate SOCKS5 handshake with client
 	_, err = client.Write([]byte{5, 0, 0, 1, 0, 0, 0, 0, 0, 0})
