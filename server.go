@@ -154,26 +154,30 @@ func (s *server) run() {
 	// For each client connection received on the listening socket, create a context and start a goroutine handling the connection
 	for {
 		acceptDone := make(chan struct{})
-		go func() {
-			var c net.Conn
+		var c net.Conn
+		gMetaLogger.Debugf("c[%%p]: %p", c)
+		go func() { // The only blocking part of this goroutine is l.Accept(), which is unblocked if l is closed, which happens when we return after s.ctx is canceled
 			c, err = l.Accept()
 			if err != nil {
 				gMetaLogger.Error(err)
 				close(acceptDone)
 				return
 			}
-			gMetaLogger.Debugf("new connection (%v) accepted", c)
+			gMetaLogger.Debugf("New net.Conn accepted (c[%%+v]: %+v, c(%%p): %p &c(%%v): %v) accepted", c, c, &c)
 
-			ctx, cancel := context.WithCancel(s.ctx)
+			connCtx, connCancel := context.WithCancel(s.ctx)
+			go s.handler.connHandle(c, s.table, connCtx, connCancel)
 
-			go s.handler.connHandle(c, s.table, ctx, cancel)
 			close(acceptDone)
 		}()
 
 		select {
 		case <-s.ctx.Done():
+			gMetaLogger.Debugf("Context of server %v has been canceled, returning from run()", s)
 			return //causes l to be closed (see defer upper) and thus the last running Accept goroutine to return.
 		case <-acceptDone:
+			gMetaLogger.Debugf("c[%%p]: %p", c)
+			defer c.Close()
 			continue
 		}
 	}
