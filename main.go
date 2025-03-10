@@ -237,15 +237,17 @@ func main() {
 		gMetaLogger.Debug("Describing servers parsed from new JSON config : ")
 		describeServers(config.Servers)
 		gServerConf.mu.Lock()
+		j := 0
 		for i := range gServerConf.servers {
-			stillExists := slices.ContainsFunc(config.Servers, func(s server) bool { return compare(s, gServerConf.servers[i]) })
+			i_fixed := i - j
+			stillExists := slices.ContainsFunc(config.Servers, func(s server) bool { return compare(s, gServerConf.servers[i_fixed]) })
 			if stillExists {
-				gMetaLogger.Debugf("Server %v still exists in new loaded servers, keeping it", gServerConf.servers[i])
+				gMetaLogger.Debugf("Server %v still exists in new loaded servers, keeping it", gServerConf.servers[i_fixed])
 			} else {
-				gMetaLogger.Debugf("Server %v does not exists anymore, stopping it", gServerConf.servers[i])
-				gServerConf.servers[i].stop()
-				gServerConf.servers = slices.Delete(gServerConf.servers, i, i+1)
-
+				gMetaLogger.Debugf("Server %v does not exists anymore, stopping it", gServerConf.servers[i_fixed])
+				gServerConf.servers[i_fixed].stop()
+				gServerConf.servers = slices.Delete(gServerConf.servers, i_fixed, i_fixed+1)
+				j = j + 1
 			}
 		}
 
@@ -266,8 +268,8 @@ func main() {
 		for i := 0; i < len(gServerConf.servers); i++ {
 			if !gServerConf.servers[i].running {
 				gMetaLogger.Debugf("myServer %v(%p) is not running, running it", gServerConf.servers[i], &gServerConf.servers[i])
-				go (gServerConf.servers[i]).run() //run() necessarly returns when the associated server ctx is cancelled with its stop() function
 				time.Sleep(1 * time.Second)
+				go (gServerConf.servers[i]).run()
 				gMetaLogger.Debugf("myServer %v(%p) is running", gServerConf.servers[i], &gServerConf.servers[i])
 			}
 		}
