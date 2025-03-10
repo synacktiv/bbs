@@ -21,6 +21,11 @@ func (p socks5) address() string {
 	return fmt.Sprintf("%s:%s", p.host, p.port)
 }
 
+// alias returns the name given to the proxy in the configuration file, for logging purpose
+func (p socks5) alias() string {
+	return p.name
+}
+
 // handshake takes net.Conn (representing a TCP socket) and an address and returns the same net.Conn connected to the provided address through the SOCKS5 proxy
 func (p socks5) handshake(conn net.Conn, address string) (err error) {
 	gMetaLogger.Debugf("Entering SOCKS5 handshake(%v, %v)", conn, address)

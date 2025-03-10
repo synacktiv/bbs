@@ -19,6 +19,11 @@ func (p httpConnect) address() string {
 	return fmt.Sprintf("%s:%s", p.host, p.port)
 }
 
+// alias returns the name given to the proxy in the configuration file, for logging purpose
+func (p httpConnect) alias() string {
+	return p.name
+}
+
 // handshake takes net.Conn (representing a TCP socket) and an address and returns the same net.Conn connected to the provided address through the HTTP CONNECT proxy
 func (p httpConnect) handshake(conn net.Conn, address string) (err error) {
 
