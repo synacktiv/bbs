@@ -234,7 +234,7 @@ func main() {
 		// Update global servers variable, stop old ones and start new ones
 
 		// Stoping running servers that are not defined in the new configuration
-		gMetaLogger.Debug("Describing servers : ")
+		gMetaLogger.Debug("Describing servers parsed from new JSON config : ")
 		describeServers(config.Servers)
 		gServerConf.mu.Lock()
 		for i := range gServerConf.servers {
@@ -266,7 +266,7 @@ func main() {
 		for i := 0; i < len(gServerConf.servers); i++ {
 			if !gServerConf.servers[i].running {
 				gMetaLogger.Debugf("myServer %v(%p) is not running, running it", gServerConf.servers[i], &gServerConf.servers[i])
-				go (gServerConf.servers[i]).run()
+				go (gServerConf.servers[i]).run() //run() necessarly returns when the associated server ctx is cancelled with its stop() function
 				time.Sleep(1 * time.Second)
 				gMetaLogger.Debugf("myServer %v(%p) is running", gServerConf.servers[i], &gServerConf.servers[i])
 			}
