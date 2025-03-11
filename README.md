@@ -4,8 +4,8 @@ The old `bbs` can be found [here](https://github.com/synacktiv/bbs/tree/v1.0)
 
 ## Description
 
-`bbs` is a router for SOCKS and HTTP proxies. It exposes SOCKS5 or HTTP
-CONNECT services and forwards incoming requests to proxies or chains of proxies
+`bbs` is a router for SOCKS and HTTP proxies. It exposes SOCKS5, HTTP
+CONNECT or port forwarding services and forwards incoming requests to proxies or chains of proxies
 based on the request's target. Routing can be configured with a PAC script (if
 built with PAC support), or through a JSON file.
 
@@ -30,7 +30,7 @@ Configuration is performed in one JSON file composed of multiple sections:
 - Proxies: defines all the upstream proxies used by bbs
 - Chains: defines the differents chains of previously defined proxies, and their settings
 - Routes: defines the different routing tables 
-- Servers: defines the listeners (SOCKS5 or HTTP) opened by bbs
+- Servers: defines the listeners (SOCKS5, HTTP or port forwarding) opened by bbs
 - Hosts: defines custom hosts resolution (in a /etc/hosts way)
 
 
@@ -135,7 +135,9 @@ Here is an example of such configuration:
   ],
   "hosts": {
     "host1": "1.1.1.1",
-    "host2": "10.0.0.1"
+    "host2": "10.0.0.1",
+    "host3": "modified.host3",
+    "10.1.1.4": "10.1.1.5"
   }
 }
 ```
@@ -239,6 +241,14 @@ connection strings of format `protocol://bind_addr:bind_port:routing_table` or
 Custom host resolution (similar to `/etc/hosts`) can be configured in the
 `hosts` section as a map of strings. Map keys correspond to the hostname
 and the values to the IP address the host should resolve to.
+
+It should be noted that map keys may also be IP addresses. In this case the 
+key IP address will be replaced by the value IP address. Similarly, map values
+may be hostnames and will replace the corresponding map key.
+
+If defined, custom host resolutions occur at the beginning of the connection phase, 
+before any local DNS resolution (if the chain is configured with proxyDns=false) and 
+before sending the destination address to the various proxies of the chain.
 
 ### PAC script
 
