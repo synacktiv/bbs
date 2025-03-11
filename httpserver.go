@@ -3,16 +3,23 @@ package main
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 )
 
-type httpHandler struct{}
+type httpHandler struct {
+	table string
+}
+
+func (h httpHandler) String() string {
+	return fmt.Sprintf("HTTP[%s]", h.table)
+}
 
 // connHandle handles the connection of a client on the input HTTP CONNECT listener.
 // It parses the CONNECT request, establishes a connection to the requested host through the right chain (found in routingtable table),
 // transfers data between the established connecion socket and the clien socket, and finally closes evetything on errors or at the end.
-func (h httpHandler) connHandle(client net.Conn, table string, ctx context.Context, cancel context.CancelFunc) {
+func (h httpHandler) connHandle(client net.Conn, ctx context.Context, cancel context.CancelFunc) {
 	gMetaLogger.Debugf("Entering httpHandler connHandle for connection (c[%%+v]: %+v, c(%%p): %p &c(%%v): %v) accepted", client, client, &client)
 	defer func() {
 		gMetaLogger.Debugf("Leaving httpHandler connHandle for connection (c[%%+v]: %+v, c(%%p): %p &c(%%v): %v) accepted", client, client, &client)
@@ -69,7 +76,7 @@ func (h httpHandler) connHandle(client net.Conn, table string, ctx context.Conte
 	} else {
 		// use JSON config to find the chain
 		gRoutingConf.mu.RLock()
-		table, ok := gRoutingConf.routing[table]
+		table, ok := gRoutingConf.routing[h.table]
 		if !ok {
 			gMetaLogger.Errorf("table %v not defined in routing configuration", table)
 			(&http.Response{StatusCode: 400, ProtoMajor: 1}).Write(client)
@@ -90,7 +97,7 @@ func (h httpHandler) connHandle(client net.Conn, table string, ctx context.Conte
 
 	if chainStr == "drop" {
 		gMetaLogger.Debugf("dropping connection to %v", addr)
-		gMetaLogger.Auditf("| DROPPED\t| %v\t| %v\t| %v\n", client, chainStr, addr)
+		gMetaLogger.Auditf("| %v\t| DROPPED\t| %v\t| %v\t| %v\n", h, client, chainStr, addr)
 		(&http.Response{StatusCode: 403, ProtoMajor: 1}).Write(client)
 		return
 	}
@@ -114,7 +121,7 @@ func (h httpHandler) connHandle(client net.Conn, table string, ctx context.Conte
 
 	if err != nil {
 		gMetaLogger.Error(err)
-		gMetaLogger.Auditf("| ERROR\t| %v\t| %v\t| %v\t| %v\n", client, chainStr, addr, chainRepresentation)
+		gMetaLogger.Auditf("| %v\t| ERROR\t| %v\t| %v\t| %v\t| %v\n", h, client, chainStr, addr, chainRepresentation)
 		(&http.Response{StatusCode: 502, ProtoMajor: 1}).Write(client)
 		return
 	}
@@ -123,8 +130,8 @@ func (h httpHandler) connHandle(client net.Conn, table string, ctx context.Conte
 	gMetaLogger.Debugf("Client %v connected to host %v through chain %v", client, addr, chainStr)
 
 	// Create auditing trace for connection opening and defering closing trace
-	gMetaLogger.Auditf("| OPEN\t| %v\t| %v\t| %v\t| %v\n", client, chainStr, addr, chainRepresentation)
-	defer gMetaLogger.Auditf("| CLOSE\t| %v\t| %v\t| %v\t| %v\n", client, chainStr, addr, chainRepresentation)
+	gMetaLogger.Auditf("| %v\t| OPEN\t| %v\t| %v\t| %v\t| %v\n", h, client, chainStr, addr, chainRepresentation)
+	defer gMetaLogger.Auditf("| %v\t| CLOSE\t| %v\t| %v\t| %v\t| %v\n", h, client, chainStr, addr, chainRepresentation)
 
 	// Send HTTP Success
 

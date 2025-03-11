@@ -173,7 +173,7 @@ func main() {
 			allExist = true
 			definedRoutingTables := slices.Collect(maps.Keys(config.Routes))
 			for index, server := range config.Servers {
-				if !slices.Contains(definedRoutingTables, server.table) {
+				if !slices.Contains(definedRoutingTables, server.table) && server.table != "" { // table may be empty in the case of a server using a forwardHandler
 					gMetaLogger.Errorf("table %v used by server number %v is not part of the defined routing tables in section routes (%v)", server.table, index, definedRoutingTables)
 					allExist = false
 				}
@@ -181,6 +181,8 @@ func main() {
 			if !allExist {
 				continue
 			}
+
+			//TODO: Check that all chains used in all servers of the servers section (chains are used for servers with a forwardHandler) correspond to an existing chain in the chains section
 
 		} else { // Otherwise, load PAC file and do not perform consistency checks
 			err := reloadPACConf(gArgPACPath)

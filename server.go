@@ -23,18 +23,19 @@ const (
 )
 
 type connHandler interface {
-	connHandle(client net.Conn, table string, ctx context.Context, cancel context.CancelFunc)
+	connHandle(client net.Conn, ctx context.Context, cancel context.CancelFunc)
 }
 
 type server struct {
-	prot    string
-	addr    string
-	port    string
-	table   string
-	handler connHandler
-	ctx     context.Context
-	cancel  context.CancelFunc
-	running bool
+	descrString string // We keep this even if it is redundant to ease comparison of servers
+	prot        string
+	addr        string
+	port        string
+	table       string
+	handler     connHandler
+	ctx         context.Context
+	cancel      context.CancelFunc
+	running     bool
 }
 
 // serverConf is the type used to hold and access a server configuration (defined in a file)
@@ -44,7 +45,7 @@ type serverConf struct {
 	mu      sync.RWMutex
 }
 
-func newServer(prot string, addr string, port string, table string) (*server, error) {
+func newServer(descr string, prot string, addr string, port string, table string, dest string, chain string) (*server, error) {
 	gMetaLogger.Debugf("Entering newServer()")
 	defer gMetaLogger.Debugf("Leaving newServer()")
 
@@ -52,22 +53,35 @@ func newServer(prot string, addr string, port string, table string) (*server, er
 
 	switch prot {
 	case "socks5":
-		handler = new(socks5Handler)
+		if table == "" {
+			return nil, fmt.Errorf("table cannot be empty for a socks5 server")
+		}
+		handler = &socks5Handler{table: table}
 	case "http":
-		handler = new(httpHandler)
+		if table == "" {
+			return nil, fmt.Errorf("table cannot be empty for a http server")
+		}
+		handler = &httpHandler{table: table}
+	case "fwd":
+		if dest == "" || chain == "" {
+			return nil, fmt.Errorf("dest and chain cannot be empty for a forward server")
+		}
+		handler = &forwardHandler{dest: dest, chain: chain}
+
 	default:
 		return nil, fmt.Errorf("%v handler type does not exist", prot)
 	}
 
 	s := &server{
-		prot:    prot,
-		addr:    addr,
-		port:    port,
-		table:   table,
-		handler: handler,
-		ctx:     nil,
-		cancel:  nil,
-		running: false,
+		descrString: descr,
+		prot:        prot,
+		addr:        addr,
+		port:        port,
+		table:       table,
+		handler:     handler,
+		ctx:         nil,
+		cancel:      nil,
+		running:     false,
 	}
 	return s, nil
 }
@@ -84,15 +98,23 @@ func newServerFromString(srvString string) (*server, error) {
 	s2 := s1[1]
 
 	s3 := strings.Split(s2, ":")
-	if len(s3) != 3 {
+	if len(s3) != 3 && len(s3) != 5 {
 		return nil, fmt.Errorf("wrong server string format")
 	}
 
 	addr := s3[0]
 	port := s3[1]
-	table := s3[2]
+	table := ""
+	dest := ""
+	chain := ""
+	if prot == "socks5" || prot == "http" {
+		table = s3[2]
+	} else if prot == "fwd" {
+		chain = s3[2]
+		dest = strings.Join(s3[3:5], ":")
+	}
 
-	return newServer(prot, addr, port, table)
+	return newServer(srvString, prot, addr, port, table, dest, chain)
 }
 
 // Custom JSON unmarshaller describing how to parse a server type from a string like "socsk5://127.0.0.1:1337:table1"
@@ -112,6 +134,7 @@ func (server *server) UnmarshalJSON(b []byte) error {
 		return err
 	}
 
+	server.descrString = tmpServer.descrString
 	server.addr = tmpServer.addr
 	server.port = tmpServer.port
 	server.prot = tmpServer.prot
@@ -128,7 +151,7 @@ func (s server) address() string {
 }
 
 func (s server) String() string {
-	return fmt.Sprintf("%s://%s:%s:%s[running:%v, handler:%v]", s.prot, s.addr, s.port, s.table, s.running, s.handler)
+	return fmt.Sprintf("%s[running:%v, handler:%v]", s.descrString, s.running, s.handler)
 }
 
 // run runs an input server of type serverType listening on address
@@ -149,7 +172,7 @@ func (s *server) run() {
 		gMetaLogger.Panic(err)
 	}
 	defer l.Close()
-	gMetaLogger.Infof("connHandler started on %v", s.address())
+	gMetaLogger.Infof("%v server started on %v", s.prot, s.address())
 
 	// For each client connection received on the listening socket, create a context and start a goroutine handling the connection
 	for {
@@ -166,7 +189,7 @@ func (s *server) run() {
 			gMetaLogger.Debugf("New net.Conn accepted (c[%%+v]: %+v, c(%%p): %p &c(%%v): %v) accepted", c, c, &c)
 
 			connCtx, connCancel := context.WithCancel(s.ctx)
-			go s.handler.connHandle(c, s.table, connCtx, connCancel)
+			go s.handler.connHandle(c, connCtx, connCancel)
 
 			close(acceptDone)
 		}()
@@ -195,8 +218,7 @@ func (s *server) stop() {
 }
 
 func compare(s1 server, s2 server) (equal bool) {
-	equal = ((s1.addr == s2.addr) && (s1.port == s2.port) && (s1.prot == s2.prot) && (s1.table == s2.table))
-	return
+	return s1.descrString == s2.descrString
 }
 
 // relay takes two net.Conn target and client (representing TCP sockets) and transfers data between them.

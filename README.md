@@ -130,7 +130,8 @@ Here is an example of such configuration:
   },
   "servers": [
     "socks5://127.0.0.1:1081:table1",
-    "http://127.0.0.1:1080:table2"
+    "http://127.0.0.1:1080:table2",
+    "fwd://127.0.0.1:4445:chain1:10.0.0.1:445"
   ],
   "hosts": {
     "host1": "1.1.1.1",
@@ -224,10 +225,13 @@ multiple routing tables. The same PAC file will be used for every opened server.
 ### Servers
 
 The listeners opened by bbs must be declared in the `servers` section as a list of 
-connection strings of format `protocol://bind_addr:bind_port:routing_table`.
+connection strings of format `protocol://bind_addr:bind_port:routing_table` or 
+`protocol://bind_addr:bind_port:chain:dest_addr:dest_port`.
 
-- `protocol` can be `http` or `socks5`
+- `protocol` can be `http` or `socks5` if the `routing_table` is provided
+- `protocol` can be `fwd` if `chain`, `dest_addr` and `dest_port` are provided
 - `routing_table` must match one of the tables defined in `routes` section
+- `chain` must match one of the chains defined in `chains` section
 
 
 ### Hosts
