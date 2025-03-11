@@ -164,7 +164,7 @@ func (chain proxyChain) connect(ctx context.Context, address string) (net.Conn, 
 
 		resolved, ok := gHosts[host]
 		if ok {
-			gMetaLogger.Debugf("%v appears in custom hosts file, resolving it to %v", host, resolved)
+			gMetaLogger.Infof("%v appears in custom hosts file, resolving it to %v", host, resolved)
 			address = net.JoinHostPort(resolved, port)
 		}
 	}

@@ -41,7 +41,7 @@ func NewMetaLogger(logWriter io.Writer, auditWriter io.Writer) *MetaLogger {
 	flags := log.LstdFlags
 	l._debug = log.New(io.Discard, "[DEBUG] ", 0)
 	l._audit = log.New(l.auditWriter, "[AUDIT] ", flags)
-	l._info = log.New(l.logWriter, "[INFO] ", flags)
+	l._info = log.New(l.logWriter, "[INFO ] ", flags)
 	l._error = log.New(l.logWriter, "[ERROR] ", flags)
 	l._fatal = log.New(l.logWriter, "[FATAL] ", flags)
 	l._panic = log.New(l.logWriter, "[PANIC] ", flags)
