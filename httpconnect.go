@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 )
 
 type httpConnect struct {
@@ -25,7 +26,7 @@ func (p httpConnect) alias() string {
 }
 
 // handshake takes net.Conn (representing a TCP socket) and an address and returns the same net.Conn connected to the provided address through the HTTP CONNECT proxy
-func (p httpConnect) handshake(conn net.Conn, address string) (err error) {
+func (p httpConnect) handshake(conn net.Conn, address string, tcpReadTimeout int64) (err error) {
 
 	gMetaLogger.Debugf("Entering CONNECT handshake(%v, %v)", conn, address)
 	defer func() { gMetaLogger.Debugf("Exiting CONNECT handshake(%v, %v)", conn, address) }()
@@ -58,6 +59,7 @@ func (p httpConnect) handshake(conn net.Conn, address string) (err error) {
 	gMetaLogger.Debugf("Wrote '%v' to the connection ", buff)
 	gMetaLogger.Debugf("Wrote '%v' to the connection ", string(buff))
 
+	conn.SetReadDeadline(time.Now().Add(time.Duration(tcpReadTimeout) * time.Millisecond))
 	response_line, err := reader.ReadString('\n')
 	if err != nil {
 		return
@@ -73,6 +75,7 @@ func (p httpConnect) handshake(conn net.Conn, address string) (err error) {
 
 	for response_line != string([]byte{10}) && response_line != string([]byte{13, 10}) {
 		gMetaLogger.Debug("reading new header line")
+		conn.SetReadDeadline(time.Now().Add(time.Duration(tcpReadTimeout) * time.Millisecond))
 		response_line, err = reader.ReadString('\n')
 		if err != nil {
 			return

@@ -13,7 +13,7 @@ import (
 // Support for other proxy types can be added by defining types implementing the proxy interface.
 type proxy interface {
 	// handshake takes net.Conn (representing a TCP socket) and an address and returns the same net.Conn connected to the provided address through the proxy
-	handshake(net.Conn, string) error
+	handshake(net.Conn, string, int64) error
 	// address returns the address where the proxy is exposed, i.e. proxy.host:proxy.port
 	address() string
 	// alias returns the name given to the proxy in the configuration file, for logging purpose
@@ -199,14 +199,8 @@ func (chain proxyChain) connect(ctx context.Context, address string) (net.Conn, 
 	}
 	gMetaLogger.Debugf("Initiate connection to %v", address)
 
-	// timeout context used to stop the connection through the proxy chain after chain.tcpReadTimeout millisecond
-	gMetaLogger.Debugf("timeout : %v", chain.tcpReadTimeout)
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(chain.tcpReadTimeout)*time.Millisecond)
-	defer cancel()
-
 	// Start connectN
 	conn, repr, err := chain.connectN(ctx, len(chain.proxies), address)
-	gMetaLogger.Debugf("connectN returned before timeout")
 	return conn, repr, err
 
 }
@@ -220,7 +214,10 @@ func (chain proxyChain) connectN(ctx context.Context, n int, address string) (co
 
 	if n == 0 { // If the subchain contains no proxy, directly connect to the provided address
 		gMetaLogger.Debugf("connectN called with n=0. Connect to %v directly.", address)
-		conn, err = d.DialContext(ctx, "tcp", address)
+
+		connectCtx, cancel := context.WithTimeout(ctx, time.Duration(chain.tcpConnectTimeout)*time.Millisecond)
+		defer cancel()
+		conn, err = d.DialContext(connectCtx, "tcp", address)
 		if err != nil {
 			repr += fmt.Sprintf("-X-> %v (%v)", address, err.Error())
 		} else {
@@ -231,7 +228,9 @@ func (chain proxyChain) connectN(ctx context.Context, n int, address string) (co
 
 		if n == 1 { // If the subchain contains only one proxy, establish a direct TCP connection to the proxy and obtain net.Conn with net.Dial
 			gMetaLogger.Debugf("connectN called with n=1. Connect to the only proxy %v", (chain.proxies[n-1]).address())
-			conn, err = d.DialContext(ctx, "tcp", (chain.proxies[n-1]).address())
+			connectCtx, cancel := context.WithTimeout(ctx, time.Duration(chain.tcpConnectTimeout)*time.Millisecond)
+			defer cancel()
+			conn, err = d.DialContext(connectCtx, "tcp", (chain.proxies[n-1]).address())
 			if err != nil {
 				repr += fmt.Sprintf("-X-> %v[%v] (%v)", (chain.proxies[n-1]).address(), (chain.proxies[n-1]).alias(), err.Error())
 				return
@@ -253,17 +252,17 @@ func (chain proxyChain) connectN(ctx context.Context, n int, address string) (co
 		resultCh := make(chan error)
 
 		go func() {
-			resultCh <- (chain.proxies[n-1]).handshake(conn, address)
+			resultCh <- (chain.proxies[n-1]).handshake(conn, address, chain.tcpReadTimeout) //handshake returns at max after a few tcpReadTimeout, or if all io is cancelled by closing conn, or if everything goes fine
 			close(resultCh)
 		}()
 
 		select {
 		case result := <-resultCh:
-			gMetaLogger.Debugf("handshake returned before timeout")
+			gMetaLogger.Debugf("handshake returned before ctx cancellation")
 			err = result
 		case <-ctx.Done():
-			gMetaLogger.Errorf("timeout during handshake with %v for %v", chain.proxies[n-1].address(), address)
-			err = fmt.Errorf("timeout during handshake()")
+			gMetaLogger.Errorf("ctx was cancelled during handshake with %v for %v: %v", chain.proxies[n-1].address(), address, ctx.Err())
+			err = fmt.Errorf("ctx was cancelled during handshake: %v", ctx.Err())
 		}
 
 		if err != nil {

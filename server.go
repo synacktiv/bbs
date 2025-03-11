@@ -154,15 +154,16 @@ func (s server) String() string {
 	return fmt.Sprintf("%s[running:%v, handler:%v]", s.descrString, s.running, s.handler)
 }
 
-// run runs an input server of type serverType listening on address
+// run runs an input server of type serverType listening on address. It returns if and only if the
+// context it creates is cancelled (i.e. the server's stop() method is called)
 func (s *server) run() {
 	gMetaLogger.Debugf("Entering %v(%p).run()", s, s)
 	defer gMetaLogger.Debugf("Leaving %v(%p).run()", s, s)
 
 	// Create a new context and store it in the server struct
-	ctx, cancel := context.WithCancel(context.Background())
+	serverCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	s.ctx = ctx
+	s.ctx = serverCtx
 	s.cancel = cancel
 	s.running = true
 
@@ -198,7 +199,9 @@ func (s *server) run() {
 		case <-s.ctx.Done():
 			gMetaLogger.Debugf("Context of server %v has been canceled, returning from run()", s)
 			return //causes l to be closed (see defer upper) and thus the last running Accept goroutine to return.
-		case <-acceptDone:
+		case <-acceptDone: //if we arrive here, the previous anonymous goroutine has returned, c may be nil or a connected client
+			// being handled in the connHandle goroutine. c will be closed when run() returns (ie. when s.stop() is called), or
+			// by connHandle() when it returns
 			gMetaLogger.Debugf("c[%%p]: %p", c)
 			defer c.Close()
 			continue

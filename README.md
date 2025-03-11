@@ -163,8 +163,9 @@ must be different than the `proxies` section map keys.
 Chain structures have proxychains-like parameters (cf. https://github.com/rofl0r/proxychains-ng):
 
 - `proxyDns`: boolean, optional, defaults to `true`
-- `tcpConnectTimeout`: integer, optional, defaults to 1000
-- `tcpReadTimeout`: integer, optional, defaults to 2000
+- `tcpConnectTimeout`: integer, optional, defaults to 1000 (used when connecting sockets, either to the first proxy
+  of the chain or directly to the target)
+- `tcpReadTimeout`: integer, optional, defaults to 2000 (used when reading proxy handshakes responses on connected sockets)
 - `proxies`: string list, optional, defaults to empty list
 
 The `proxies` key of a `chain` must contain an array of proxy names declared as keys in the `proxies` section.

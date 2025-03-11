@@ -19,6 +19,7 @@ func (h socks5Handler) String() string {
 // connHandle handles the connection of a client on the input SOCKS5 listener.
 // It parses the SOCKS command, establishes a connection to the requested host through the right chain (found in routingtable table),
 // transfers data between the established connecion socket and the clien socket, and finally closes evetything on errors or at the end.
+// Takes a context with its cancel function, and calls it before returning (also closes client)
 func (h socks5Handler) connHandle(client net.Conn, ctx context.Context, cancel context.CancelFunc) {
 	gMetaLogger.Debugf("Entering socks5Handler connHandle for connection (c[%%+v]: %+v, c(%%p): %p &c(%%v): %v) accepted", client, client, &client)
 	defer func() {
@@ -26,6 +27,7 @@ func (h socks5Handler) connHandle(client net.Conn, ctx context.Context, cancel c
 	}()
 
 	defer client.Close()
+	defer cancel()
 
 	// ***** BEGIN SOCKS5 input parsing *****
 
@@ -34,6 +36,7 @@ func (h socks5Handler) connHandle(client net.Conn, ctx context.Context, cancel c
 	reader := bufio.NewReader(client)
 
 	// Read version and number of methods
+	//TODO: should we also set a deadline (of tcpReadTimeout) on read operations on client side sockets ?
 	buff := make([]byte, 2)
 	_, err := io.ReadFull(reader, buff)
 	if err != nil {

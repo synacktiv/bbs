@@ -19,6 +19,7 @@ func (h httpHandler) String() string {
 // connHandle handles the connection of a client on the input HTTP CONNECT listener.
 // It parses the CONNECT request, establishes a connection to the requested host through the right chain (found in routingtable table),
 // transfers data between the established connecion socket and the clien socket, and finally closes evetything on errors or at the end.
+// Takes a context with its cancel function, and calls it before returning (also closes client)
 func (h httpHandler) connHandle(client net.Conn, ctx context.Context, cancel context.CancelFunc) {
 	gMetaLogger.Debugf("Entering httpHandler connHandle for connection (c[%%+v]: %+v, c(%%p): %p &c(%%v): %v) accepted", client, client, &client)
 	defer func() {
@@ -26,6 +27,7 @@ func (h httpHandler) connHandle(client net.Conn, ctx context.Context, cancel con
 	}()
 
 	defer client.Close()
+	defer cancel()
 
 	// ***** BEGIN HTTP CONNECT input parsing *****
 

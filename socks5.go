@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"time"
 )
 
 type socks5 struct {
@@ -27,7 +28,7 @@ func (p socks5) alias() string {
 }
 
 // handshake takes net.Conn (representing a TCP socket) and an address and returns the same net.Conn connected to the provided address through the SOCKS5 proxy
-func (p socks5) handshake(conn net.Conn, address string) (err error) {
+func (p socks5) handshake(conn net.Conn, address string, tcpReadTimeout int64) (err error) {
 	gMetaLogger.Debugf("Entering SOCKS5 handshake(%v, %v)", conn, address)
 	defer func() { gMetaLogger.Debugf("Exiting SOCKS5 handshake(%v, %v)", conn, address) }()
 
@@ -41,6 +42,7 @@ func (p socks5) handshake(conn net.Conn, address string) (err error) {
 
 	if p.user != "" {
 		//Means that user/password authentication method (0x02) is supported
+		//TODO: do we also set a deadline (of tcpReadTimeout) on write operations ?
 		_, err = conn.Write([]byte{5, 2, 0, 2})
 	} else {
 		//Means only "no authentication" is supported
@@ -52,9 +54,11 @@ func (p socks5) handshake(conn net.Conn, address string) (err error) {
 	}
 
 	//Read server response containing  |VER|METHOD|
+	conn.SetReadDeadline(time.Now().Add(time.Duration(tcpReadTimeout) * time.Millisecond))
 	buff := make([]byte, 2)
 	_, err = io.ReadFull(reader, buff)
 	if err != nil {
+		err = fmt.Errorf("error reading SOCKS server's METHOD selection response: %w", err)
 		return
 	}
 
@@ -96,10 +100,11 @@ func (p socks5) handshake(conn net.Conn, address string) (err error) {
 	}
 	gMetaLogger.Debugf("sent the following SOCKS request: %v", buff)
 
+	conn.SetReadDeadline(time.Now().Add(time.Duration(tcpReadTimeout) * time.Millisecond))
 	buff = make([]byte, 4)
 	_, err = io.ReadFull(reader, buff)
 	if err != nil {
-		err = fmt.Errorf("error reading SOCKS response: %w", err)
+		err = fmt.Errorf("error reading SOCKS server's reply to SOCKS request: %w", err)
 		return
 	}
 	gMetaLogger.Debugf("received the following SOCKS response: %v", buff)
