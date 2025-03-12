@@ -40,9 +40,11 @@ type server struct {
 
 // serverConf is the type used to hold and access a server configuration (defined in a file)
 type serverConf struct {
-	servers []server
-	valid   bool // whether the current configuration is valid
-	mu      sync.RWMutex
+	servers []*server /* we use pointer to server structs because (*server).run needs pointers and needs the server pointed to not to change
+	(if we use a []server here and pass run() a pointer to a slice element, the true server at this address may change, for exemple when
+	slice elements are removed) */
+	valid bool // whether the current configuration is valid
+	mu    sync.RWMutex
 }
 
 func newServer(descr string, prot string, addr string, port string, table string, dest string, chain string) (*server, error) {
@@ -151,7 +153,7 @@ func (s server) address() string {
 }
 
 func (s server) String() string {
-	return fmt.Sprintf("%s[running:%v, handler:%v]", s.descrString, s.running, s.handler)
+	return fmt.Sprintf("%s[run:%v]", s.descrString, s.running)
 }
 
 // run runs an input server of type serverType listening on address. It returns if and only if the
@@ -197,7 +199,7 @@ func (s *server) run() {
 
 		select {
 		case <-s.ctx.Done():
-			gMetaLogger.Debugf("Context of server %v has been canceled, returning from run()", s)
+			gMetaLogger.Debugf("Context of server %v(%p) has been canceled, returning from run()", s, s)
 			return //causes l to be closed (see defer upper) and thus the last running Accept goroutine to return.
 		case <-acceptDone: //if we arrive here, the previous anonymous goroutine has returned, c may be nil or a connected client
 			// being handled in the connHandle goroutine. c will be closed when run() returns (ie. when s.stop() is called), or
@@ -210,11 +212,11 @@ func (s *server) run() {
 }
 
 func (s *server) stop() {
-	gMetaLogger.Debugf("Entering %v.stop()", s)
-	defer gMetaLogger.Debugf("Leaving %v.stop()", s)
+	gMetaLogger.Debugf("Entering %v(%p).stop()", s, s)
+	defer gMetaLogger.Debugf("Leaving %v(%p).stop()", s, s)
 
 	if s.running {
-		gMetaLogger.Debugf("%v server is running, stopping it.", s)
+		gMetaLogger.Debugf("%v(%p) server is running, stopping it.", s, s)
 		s.cancel()
 		s.running = false
 	}
@@ -266,8 +268,23 @@ func relay(client net.Conn, target net.Conn) {
 }
 
 func describeServers(servers []server) {
-	gMetaLogger.Debugf("Describing server slice %p : %v", servers, servers)
+	logStr := fmt.Sprintf("Describing server slice. SliceArray(servers[%%p]): %p. SliceLen(len(servers)[%%v]): %v. SliceCap(cap(servers)[%%v]): %v\n", servers, len(servers), cap(servers))
+	logStr += fmt.Sprintf("SliceContent(servers[%%v]): %v\n", servers)
 	for i := 0; i < len(servers); i++ {
-		gMetaLogger.Debugf("Index %v. Server %p : %v", i, &(servers[i]), servers[i])
+		logStr += fmt.Sprintf("Index(i[%%v]) %v. Server(servers[i][%%v]) %v\n", i, servers[i])
 	}
+
+	gMetaLogger.Debug(logStr)
+}
+
+func describeServerPointers(servers []*server) {
+	logStr := fmt.Sprintf("Describing server pointers slice. SliceArray(servers[%%p]): %p. SliceLen(len(servers)[%%v]): %v. SliceCap(cap(servers)[%%v]): %v\n",
+		servers, len(servers), cap(servers))
+	logStr += fmt.Sprintf("SliceContent(servers[%%v]): %v\n", servers)
+
+	for i := 0; i < len(servers); i++ {
+		logStr += fmt.Sprintf("Index(i[%%v]) %v. Pointer(servers[i][%%p]): %p. PointedServer(*servers[i][%%+v]): %+v\n", i, servers[i], *(servers[i]))
+	}
+
+	gMetaLogger.Debug(logStr)
 }

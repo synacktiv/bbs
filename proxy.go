@@ -252,7 +252,8 @@ func (chain proxyChain) connectN(ctx context.Context, n int, address string) (co
 		resultCh := make(chan error)
 
 		go func() {
-			resultCh <- (chain.proxies[n-1]).handshake(conn, address, chain.tcpReadTimeout) //handshake returns at max after a few tcpReadTimeout, or if all io is cancelled by closing conn, or if everything goes fine
+			resultCh <- (chain.proxies[n-1]).handshake(conn, address, chain.tcpReadTimeout) //handshake returns at max after a few tcpReadTimeout,
+			// or if all io is cancelled by closing conn (the upstream connection socket), or if everything goes fine
 			close(resultCh)
 		}()
 

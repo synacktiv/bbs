@@ -102,7 +102,7 @@ func main() {
 		gMetaLogger.Infof("Signal %v received, reloading configurations", sig)
 
 		gMetaLogger.Debug("Describing gServerConf.servers : ")
-		describeServers(gServerConf.servers)
+		describeServerPointers(gServerConf.servers)
 
 		// Load main config from the unified config file (proxies, chains, routes, servers and hosts)
 		config, err := parseMainConfig(gArgConfigPath)
@@ -238,15 +238,19 @@ func main() {
 		// Stoping running servers that are not defined in the new configuration
 		gMetaLogger.Debug("Describing servers parsed from new JSON config : ")
 		describeServers(config.Servers)
+
+		gMetaLogger.Debug("Describing gServerConf.servers before adding and deleting: ")
+		describeServerPointers(gServerConf.servers)
+
 		gServerConf.mu.Lock()
 		j := 0
 		for i := range gServerConf.servers {
 			i_fixed := i - j
-			stillExists := slices.ContainsFunc(config.Servers, func(s server) bool { return compare(s, gServerConf.servers[i_fixed]) })
+			stillExists := slices.ContainsFunc(config.Servers, func(s server) bool { return compare(s, *(gServerConf.servers[i_fixed])) })
 			if stillExists {
-				gMetaLogger.Debugf("Server %v still exists in new loaded servers, keeping it", gServerConf.servers[i_fixed])
+				gMetaLogger.Debugf("Server %v(%p) still exists in new loaded servers, keeping it", gServerConf.servers[i_fixed], gServerConf.servers[i_fixed])
 			} else {
-				gMetaLogger.Debugf("Server %v does not exists anymore, stopping it", gServerConf.servers[i_fixed])
+				gMetaLogger.Debugf("Server %v(%p) does not exists anymore, stopping it", gServerConf.servers[i_fixed], gServerConf.servers[i_fixed])
 				gServerConf.servers[i_fixed].stop()
 				gServerConf.servers = slices.Delete(gServerConf.servers, i_fixed, i_fixed+1)
 				j = j + 1
@@ -254,30 +258,34 @@ func main() {
 		}
 
 		for i := range config.Servers {
-			alreadyExists := slices.ContainsFunc(gServerConf.servers, func(s server) bool { return compare(s, config.Servers[i]) })
+			alreadyExists := slices.ContainsFunc(gServerConf.servers, func(s *server) bool { return compare(*s, config.Servers[i]) })
 			if !alreadyExists {
-				gServerConf.servers = append(gServerConf.servers, config.Servers[i])
+				/* If a server in the newly parsed config.Servers does not yet exists in global gServerConf.servers, copy the server struct
+				from config.Servers[i] in a newly allocated server struct, and store a pointer to this struct in gServerConf.servers. This
+				way, only gServerConf.servers holds a reference to this server, and we are safe with the potential modifications on config.Servers */
+				gMetaLogger.Debugf("Server %v does not yet exists, adding it to global servers\n", config.Servers[i])
+				newServer := config.Servers[i]
+				gServerConf.servers = append(gServerConf.servers, &newServer)
 			}
 		}
 
 		gServerConf.mu.Unlock()
 
-		gMetaLogger.Debugf("gServerConf.servers : %v", gServerConf.servers)
-		gMetaLogger.Debug("Describing gServerConf.servers : ")
-		describeServers(gServerConf.servers)
+		gMetaLogger.Debug("Describing gServerConf.servers before running new ones: ")
+		describeServerPointers(gServerConf.servers)
 
 		// Start all servers that are not running
 		for i := 0; i < len(gServerConf.servers); i++ {
 			if !gServerConf.servers[i].running {
-				gMetaLogger.Debugf("myServer %v(%p) is not running, running it", gServerConf.servers[i], &gServerConf.servers[i])
+				gMetaLogger.Debugf("Server %v(%p) is not running, running it", gServerConf.servers[i], gServerConf.servers[i])
 				time.Sleep(1 * time.Second)
 				go (gServerConf.servers[i]).run()
-				gMetaLogger.Debugf("myServer %v(%p) is running", gServerConf.servers[i], &gServerConf.servers[i])
 			}
 		}
 
-		gMetaLogger.Debug("Describing gServerConf.servers : ")
-		describeServers(gServerConf.servers)
+		time.Sleep(1 * time.Second)
+		gMetaLogger.Debug("Describing gServerConf.servers after running new ones : ")
+		describeServerPointers(gServerConf.servers)
 
 	}
 }
