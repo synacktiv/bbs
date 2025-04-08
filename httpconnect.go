@@ -61,6 +61,7 @@ func (p httpConnect) handshake(conn net.Conn, address string, tcpReadTimeout int
 
 	conn.SetReadDeadline(time.Now().Add(time.Duration(tcpReadTimeout) * time.Millisecond))
 	response_line, err := reader.ReadString('\n')
+	conn.SetReadDeadline(time.Time{})
 	if err != nil {
 		return
 	}
@@ -77,6 +78,7 @@ func (p httpConnect) handshake(conn net.Conn, address string, tcpReadTimeout int
 		gMetaLogger.Debug("reading new header line")
 		conn.SetReadDeadline(time.Now().Add(time.Duration(tcpReadTimeout) * time.Millisecond))
 		response_line, err = reader.ReadString('\n')
+		conn.SetReadDeadline(time.Time{})
 		if err != nil {
 			return
 		}

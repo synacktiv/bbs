@@ -57,6 +57,7 @@ func (p socks5) handshake(conn net.Conn, address string, tcpReadTimeout int64) (
 	conn.SetReadDeadline(time.Now().Add(time.Duration(tcpReadTimeout) * time.Millisecond))
 	buff := make([]byte, 2)
 	_, err = io.ReadFull(reader, buff)
+	conn.SetReadDeadline(time.Time{})
 	if err != nil {
 		err = fmt.Errorf("error reading SOCKS server's METHOD selection response: %w", err)
 		return
@@ -103,6 +104,7 @@ func (p socks5) handshake(conn net.Conn, address string, tcpReadTimeout int64) (
 	conn.SetReadDeadline(time.Now().Add(time.Duration(tcpReadTimeout) * time.Millisecond))
 	buff = make([]byte, 4)
 	_, err = io.ReadFull(reader, buff)
+	conn.SetReadDeadline(time.Time{})
 	if err != nil {
 		err = fmt.Errorf("error reading SOCKS server's reply to SOCKS request: %w", err)
 		return
