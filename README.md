@@ -181,7 +181,7 @@ composed of the single associated proxy.
 The built-in configuration mode for routing is through the configuration file. It associates
 addresses with chain names. The file must contain a map of routing tables. Map keys
 are chosen freely but must match the ones used in the `servers` section. 
-Each routing table contains a `default` representing the default route and a `blocks` key
+Each routing table contains a `default` key representing the default route and a `blocks` key
 which is an array of rule blocks. Each
 rule block contains a `comment`, a set of `rules`, and an associated chain
 name. Rules are evaluated: given an address in the `host:port` format, they can
