@@ -157,7 +157,7 @@ func main() {
 			allExist = true
 			definedChains := slices.Collect(maps.Keys(config.Chains))
 			for routingTableName, routingTable := range config.Routes {
-				for index, ruleBlock := range routingTable {
+				for index, ruleBlock := range routingTable.Blocks {
 
 					if ruleBlock.Route != "drop" && !slices.Contains(definedChains, ruleBlock.Route) {
 						gMetaLogger.Errorf("route %v defined in ruleBlock number %v of routingTable %v is not part of the defined chains in the chains section (%v)", ruleBlock.Route, index, routingTableName, definedChains)

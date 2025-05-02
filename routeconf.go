@@ -21,7 +21,10 @@ type routingConf struct {
 type routing map[string]routingTable
 
 // Holds the ordered list of rule blocks that constitutes the core of the routing model. See README.md#Configuration##routing JSON configuration
-type routingTable []ruleBlock
+type routingTable struct {
+	Default string
+	Blocks  []ruleBlock
+}
 
 // Maps the JSON fields described in README.md#Configuration##Routing JSON configuration
 type ruleBlock struct {
@@ -259,9 +262,10 @@ func (rBlock *ruleBlock) UnmarshalJSON(b []byte) error {
 func (rTable *routingTable) UnmarshalJSON(b []byte) error {
 
 	// First, parse all the blocks in the table
-	type tmpTable []ruleBlock
+	type tmpRoutingTable routingTable
 
-	var tmp tmpTable
+	var tmp tmpRoutingTable
+	tmp.Default = "drop" // Default value for the default route
 
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.DisallowUnknownFields()
@@ -271,10 +275,12 @@ func (rTable *routingTable) UnmarshalJSON(b []byte) error {
 		return err
 	}
 
+	rTable.Default = tmp.Default
+
 	// Then, only keep the blocks that are not disabled (with the '"disable": true' json field)
-	for _, block := range tmp {
+	for _, block := range tmp.Blocks {
 		if !block.Disable {
-			*rTable = append(*rTable, block)
+			rTable.Blocks = append(rTable.Blocks, block)
 		}
 	}
 
@@ -284,7 +290,7 @@ func (rTable *routingTable) UnmarshalJSON(b []byte) error {
 // getRoute returns in route the chain to use for a given destination address string addr.
 // For each RuleBlock of the routing table, it evaluates addr against the rules and stops at the first evaluation returning true.
 func (table routingTable) getRoute(addr string) (route string, err error) {
-	for _, rBlock := range table {
+	for _, rBlock := range table.Blocks {
 		matched, err := rBlock.Rules.evaluate(addr)
 		if err != nil {
 			err = fmt.Errorf("error evaluating %v : %v", rBlock.Rules, err)
@@ -295,6 +301,11 @@ func (table routingTable) getRoute(addr string) (route string, err error) {
 			return rBlock.Route, nil
 		}
 	}
-	err = fmt.Errorf("all blocks evaluated to false for %v", addr)
-	return "", err
+	gMetaLogger.Debugf("no ruleBlock matched for address %v, using default route %v", addr, table.Default)
+	if table.Default != "" {
+		return table.Default, nil
+	}
+	gMetaLogger.Debugf("no default route for address %v", addr)
+	// No ruleBlock matched and no default route, return "drop" to indicate that the address should be dropped
+	return "drop", nil
 }

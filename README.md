@@ -66,67 +66,68 @@ Here is an example of such configuration:
     }
   },
   "routes": {
-    "table1": [
-      {
-        "comment": "Block1 comment",
-        "rules": {
-          "rule": "regexp",
-          "variable": "host",
-          "content": "me\\.gandi\\.net"
-        },
-        "route": "chain1"
-      },
-      {
-        "comment": "Route web traffic towards 10.35.0.0/16 through chain1",
-        "rules": {
-          "rule1": {
-            "rule": "subnet",
-            "content": "10.35.0.0/16"
+    "table1": {
+      "default": "direct",
+      "blocks": [
+        {
+          "comment": "Block1 comment",
+          "rules": {
+            "rule": "regexp",
+            "variable": "host",
+            "content": "me\\.gandi\\.net"
           },
-          "op": "AND",
-          "rule2": {
+          "route": "chain1"
+        },
+        {
+          "comment": "Route web traffic towards 10.35.0.0/16 through proxy2",
+          "rules": {
+            "rule1": {
+              "rule": "subnet",
+              "content": "10.35.0.0/16"
+            },
+            "op": "AND",
+            "rule2": {
+              "rule": "regexp",
+              "variable": "port",
+              "content": "^(80|443)$"
+            }
+          },
+          "route": "proxy2"
+        },
+        {
+          "comment": "Drop traffic to 445",
+          "rules": {
             "rule": "regexp",
             "variable": "port",
-            "content": "^(80|443)$"
-          }
+            "content": "^445$"
+          },
+          "route": "drop"
         },
-        "route": "proxy2"
-      },
-      {
-        "comment": "Drop traffic to 445",
-        "rules": {
-          "rule": "regexp",
-          "variable": "port",
-          "content": "^445$"
-        },
-        "route": "drop"
-      },
-      {
-        "comment": "Route *.corp.local through chain2",
-        "rules": {
-          "rule": "regexp",
-          "variable": "host",
-          "content": "(?i)^(.*\\.)?corp\\.local$"
-        },
-        "route": "chain1"
-      },
-      {
-        "comment": "Default routing through direct chain",
-        "rules": {
-          "rule": "true"
-        },
-        "route": "direct"
-      }
-    ],
-    "table2": [
-      {
-        "comment": "Default routing through chain1",
-        "rules": {
-          "rule": "true"
-        },
-        "route": "chain1"
-      }
-    ]
+        {
+          "comment": "Route *.corp.local through chain1",
+          "rules": {
+            "rule": "regexp",
+            "variable": "host",
+            "content": "(?i)^(.*\\.)?corp\\.local$"
+          },
+          "route": "chain1"
+        }
+      ]
+    },
+    "table2": {
+      "default": "drop",
+      "blocks": [
+        {
+          "comment": "Route *.corp.local through chain2",
+          "rules": {
+            "rule": "regexp",
+            "variable": "host",
+            "content": "(?i)^(.*\\.)?corp\\.local$"
+          },
+          "route": "chain2"
+        }     
+      ]
+    }
   },
   "servers": [
     "socks5://127.0.0.1:1081:table1",
@@ -180,7 +181,8 @@ composed of the single associated proxy.
 The built-in configuration mode for routing is through the configuration file. It associates
 addresses with chain names. The file must contain a map of routing tables. Map keys
 are chosen freely but must match the ones used in the `servers` section. 
-Each routing table is an array of rule blocks. Each
+Each routing table contains a `default` representing the default route and a `blocks` key
+which is an array of rule blocks. Each
 rule block contains a `comment`, a set of `rules`, and an associated chain
 name. Rules are evaluated: given an address in the `host:port` format, they can
 be `true` or `false`. For a given address, blocks are evaluated in their
@@ -189,7 +191,8 @@ This allows for a form of "commenting", which is not possible in JSON.
 The evaluation stops at the first block that is `true` and
 the associated chain name is returned. Each opened server (from `servers` section)
 is associated with one routing table from the configuration. Requests received on 
-each server are routed according to the matching routing table.
+each server are routed according to the matching routing table. If all blocks evaluate to 
+`false` the default route is used. If `default` is not defined, connections are dropped by default.
 
 
 Block fields:
