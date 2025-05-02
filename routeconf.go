@@ -101,9 +101,6 @@ func (r rule) evaluate(addr string) (bool, error) {
 		inSubnet := network.Contains(hostIPv4)
 		return (r.Negate != inSubnet), nil
 
-	case "true":
-		return true, nil
-
 	default:
 		err = fmt.Errorf("unknown rule type : %v", r.Rule)
 		return true, err

@@ -215,7 +215,6 @@ RuleCombo fields:
 Rule types:
  - `regexp`: match the variable defined in `variable` (`host`, `port` or `addr=host:port`) against the regexp in `content`.
  - `subnet`: checks if host is in the subnet defined in `content`. If host is a domain name and not a subnet address, the rule returns false.
- - `true`: returns `true` for every address. Useful for default routing at the end of the block array.
 
 The rule blocks from `routes` section or the PAC function must return declared
 chain names, not proxy names. If you want to use a single proxy, you must wrap
