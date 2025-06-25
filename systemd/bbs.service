@@ -1,5 +1,6 @@
 [Unit]
 Description=bbs
+Requires=bbs-watcher.path
 
 [Service]
 WorkingDirectory=%h/.config/bbs/
