@@ -23,28 +23,31 @@ const (
 )
 
 type connHandler interface {
-	connHandle(client net.Conn, table string, ctx context.Context, cancel context.CancelFunc)
+	connHandle(client net.Conn, ctx context.Context, cancel context.CancelFunc)
 }
 
 type server struct {
-	prot    string
-	addr    string
-	port    string
-	table   string
-	handler connHandler
-	ctx     context.Context
-	cancel  context.CancelFunc
-	running bool
+	descrString string // We keep this even if it is redundant to ease comparison of servers
+	prot        string
+	addr        string
+	port        string
+	table       string
+	handler     connHandler
+	ctx         context.Context
+	cancel      context.CancelFunc
+	running     bool
 }
 
 // serverConf is the type used to hold and access a server configuration (defined in a file)
 type serverConf struct {
-	servers []server
-	valid   bool // whether the current configuration is valid
-	mu      sync.RWMutex
+	servers []*server /* we use pointer to server structs because (*server).run needs pointers and needs the server pointed to not to change
+	(if we use a []server here and pass run() a pointer to a slice element, the true server at this address may change, for exemple when
+	slice elements are removed) */
+	valid bool // whether the current configuration is valid
+	mu    sync.RWMutex
 }
 
-func newServer(prot string, addr string, port string, table string) (*server, error) {
+func newServer(descr string, prot string, addr string, port string, table string, dest string, chain string) (*server, error) {
 	gMetaLogger.Debugf("Entering newServer()")
 	defer gMetaLogger.Debugf("Leaving newServer()")
 
@@ -52,22 +55,35 @@ func newServer(prot string, addr string, port string, table string) (*server, er
 
 	switch prot {
 	case "socks5":
-		handler = new(socks5Handler)
+		if table == "" {
+			return nil, fmt.Errorf("table cannot be empty for a socks5 server")
+		}
+		handler = &socks5Handler{table: table}
 	case "http":
-		handler = new(httpHandler)
+		if table == "" {
+			return nil, fmt.Errorf("table cannot be empty for a http server")
+		}
+		handler = &httpHandler{table: table}
+	case "fwd":
+		if dest == "" || chain == "" {
+			return nil, fmt.Errorf("dest and chain cannot be empty for a forward server")
+		}
+		handler = &forwardHandler{dest: dest, chain: chain}
+
 	default:
 		return nil, fmt.Errorf("%v handler type does not exist", prot)
 	}
 
 	s := &server{
-		prot:    prot,
-		addr:    addr,
-		port:    port,
-		table:   table,
-		handler: handler,
-		ctx:     nil,
-		cancel:  nil,
-		running: false,
+		descrString: descr,
+		prot:        prot,
+		addr:        addr,
+		port:        port,
+		table:       table,
+		handler:     handler,
+		ctx:         nil,
+		cancel:      nil,
+		running:     false,
 	}
 	return s, nil
 }
@@ -84,15 +100,23 @@ func newServerFromString(srvString string) (*server, error) {
 	s2 := s1[1]
 
 	s3 := strings.Split(s2, ":")
-	if len(s3) != 3 {
+	if len(s3) != 3 && len(s3) != 5 {
 		return nil, fmt.Errorf("wrong server string format")
 	}
 
 	addr := s3[0]
 	port := s3[1]
-	table := s3[2]
+	table := ""
+	dest := ""
+	chain := ""
+	if prot == "socks5" || prot == "http" {
+		table = s3[2]
+	} else if prot == "fwd" {
+		chain = s3[2]
+		dest = strings.Join(s3[3:5], ":")
+	}
 
-	return newServer(prot, addr, port, table)
+	return newServer(srvString, prot, addr, port, table, dest, chain)
 }
 
 // Custom JSON unmarshaller describing how to parse a server type from a string like "socsk5://127.0.0.1:1337:table1"
@@ -112,6 +136,7 @@ func (server *server) UnmarshalJSON(b []byte) error {
 		return err
 	}
 
+	server.descrString = tmpServer.descrString
 	server.addr = tmpServer.addr
 	server.port = tmpServer.port
 	server.prot = tmpServer.prot
@@ -128,18 +153,19 @@ func (s server) address() string {
 }
 
 func (s server) String() string {
-	return fmt.Sprintf("%s://%s:%s:%s[running:%v, handler:%v]", s.prot, s.addr, s.port, s.table, s.running, s.handler)
+	return fmt.Sprintf("%s[run:%v]", s.descrString, s.running)
 }
 
-// run runs an input server of type serverType listening on address
+// run runs an input server of type serverType listening on address. It returns if and only if the
+// context it creates is cancelled (i.e. the server's stop() method is called)
 func (s *server) run() {
 	gMetaLogger.Debugf("Entering %v(%p).run()", s, s)
 	defer gMetaLogger.Debugf("Leaving %v(%p).run()", s, s)
 
 	// Create a new context and store it in the server struct
-	ctx, cancel := context.WithCancel(context.Background())
+	serverCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	s.ctx = ctx
+	s.ctx = serverCtx
 	s.cancel = cancel
 	s.running = true
 
@@ -149,50 +175,55 @@ func (s *server) run() {
 		gMetaLogger.Panic(err)
 	}
 	defer l.Close()
-	gMetaLogger.Infof("connHandler started on %v", s.address())
+	gMetaLogger.Infof("%v server started on %v", s.prot, s.address())
 
 	// For each client connection received on the listening socket, create a context and start a goroutine handling the connection
 	for {
 		acceptDone := make(chan struct{})
-		go func() {
-			var c net.Conn
+		var c net.Conn
+		gMetaLogger.Debugf("c[%%p]: %p", c)
+		go func() { // The only blocking part of this goroutine is l.Accept(), which is unblocked if l is closed, which happens when we return after s.ctx is canceled
 			c, err = l.Accept()
 			if err != nil {
 				gMetaLogger.Error(err)
 				close(acceptDone)
 				return
 			}
-			gMetaLogger.Debugf("new connection (%v) accepted", c)
+			gMetaLogger.Debugf("New net.Conn accepted (c[%%+v]: %+v, c(%%p): %p &c(%%v): %v) accepted", c, c, &c)
 
-			ctx, cancel := context.WithCancel(s.ctx)
+			connCtx, connCancel := context.WithCancel(s.ctx)
+			go s.handler.connHandle(c, connCtx, connCancel)
 
-			go s.handler.connHandle(c, s.table, ctx, cancel)
 			close(acceptDone)
 		}()
 
 		select {
 		case <-s.ctx.Done():
+			gMetaLogger.Debugf("Context of server %v(%p) has been canceled, returning from run()", s, s)
 			return //causes l to be closed (see defer upper) and thus the last running Accept goroutine to return.
-		case <-acceptDone:
+		case <-acceptDone: //if we arrive here, the previous anonymous goroutine has returned, c may be nil or a connected client
+			// being handled in the connHandle goroutine. c will be closed when run() returns (ie. when s.stop() is called), or
+			// by connHandle() when it returns
+			gMetaLogger.Debugf("c[%%p]: %p", c)
+			defer c.Close()
 			continue
 		}
 	}
 }
 
 func (s *server) stop() {
-	gMetaLogger.Debugf("Entering %v.stop()", s)
-	defer gMetaLogger.Debugf("Leaving %v.stop()", s)
+	gMetaLogger.Debugf("Entering %v(%p).stop()", s, s)
+	defer gMetaLogger.Debugf("Leaving %v(%p).stop()", s, s)
 
 	if s.running {
-		gMetaLogger.Debugf("%v server is running, stopping it.", s)
+		gMetaLogger.Debugf("%v(%p) server is running, stopping it.", s, s)
 		s.cancel()
 		s.running = false
 	}
 }
 
 func compare(s1 server, s2 server) (equal bool) {
-	equal = ((s1.addr == s2.addr) && (s1.port == s2.port) && (s1.prot == s2.prot) && (s1.table == s2.table))
-	return
+	return s1.descrString == s2.descrString
 }
 
 // relay takes two net.Conn target and client (representing TCP sockets) and transfers data between them.
@@ -237,8 +268,23 @@ func relay(client net.Conn, target net.Conn) {
 }
 
 func describeServers(servers []server) {
-	gMetaLogger.Debugf("Describing server slice %p : %v", servers, servers)
+	logStr := fmt.Sprintf("Describing server slice. SliceArray(servers[%%p]): %p. SliceLen(len(servers)[%%v]): %v. SliceCap(cap(servers)[%%v]): %v\n", servers, len(servers), cap(servers))
+	logStr += fmt.Sprintf("SliceContent(servers[%%v]): %v\n", servers)
 	for i := 0; i < len(servers); i++ {
-		gMetaLogger.Debugf("Index %v. Server %p : %v", i, &(servers[i]), servers[i])
+		logStr += fmt.Sprintf("Index(i[%%v]) %v. Server(servers[i][%%v]) %v\n", i, servers[i])
 	}
+
+	gMetaLogger.Debug(logStr)
+}
+
+func describeServerPointers(servers []*server) {
+	logStr := fmt.Sprintf("Describing server pointers slice. SliceArray(servers[%%p]): %p. SliceLen(len(servers)[%%v]): %v. SliceCap(cap(servers)[%%v]): %v\n",
+		servers, len(servers), cap(servers))
+	logStr += fmt.Sprintf("SliceContent(servers[%%v]): %v\n", servers)
+
+	for i := 0; i < len(servers); i++ {
+		logStr += fmt.Sprintf("Index(i[%%v]) %v. Pointer(servers[i][%%p]): %p. PointedServer(*servers[i][%%+v]): %+v\n", i, servers[i], *(servers[i]))
+	}
+
+	gMetaLogger.Debug(logStr)
 }

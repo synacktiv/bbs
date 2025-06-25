@@ -13,9 +13,11 @@ import (
 // Support for other proxy types can be added by defining types implementing the proxy interface.
 type proxy interface {
 	// handshake takes net.Conn (representing a TCP socket) and an address and returns the same net.Conn connected to the provided address through the proxy
-	handshake(net.Conn, string) error
+	handshake(net.Conn, string, int64) error
 	// address returns the address where the proxy is exposed, i.e. proxy.host:proxy.port
 	address() string
+	// alias returns the name given to the proxy in the configuration file, for logging purpose
+	alias() string
 }
 
 type baseProxy struct {
@@ -24,6 +26,7 @@ type baseProxy struct {
 	port string
 	user string
 	pass string
+	name string
 }
 
 type proxyMap map[string]proxy
@@ -69,7 +72,7 @@ func (p *proxyMap) UnmarshalJSON(b []byte) error {
 	*p = make(map[string]proxy)
 	gMetaLogger.Debug("ok")
 	for k, v := range tmp {
-		(*p)[k], err = newProxy(v.prot, v.host, v.port, v.user, v.pass)
+		(*p)[k], err = newProxy(v.prot, v.host, v.port, v.user, v.pass, k)
 		if err != nil {
 			err = fmt.Errorf("error creating new proxy from baseProxy %v", v)
 			return err
@@ -101,12 +104,12 @@ func newBaseProxyFromString(connString string, user string, pass string) (*baseP
 	return &baseProxy{prot: prot, host: host, port: port, user: user, pass: pass}, nil
 }
 
-func newProxy(prot string, host string, port string, user string, pass string) (proxy, error) {
+func newProxy(prot string, host string, port string, user string, pass string, name string) (proxy, error) {
 	switch prot {
 	case "socks5":
-		return socks5{baseProxy{prot: prot, host: host, port: port, user: user, pass: pass}}, nil
+		return socks5{baseProxy{prot: prot, host: host, port: port, user: user, pass: pass, name: name}}, nil
 	case "httpconnect", "http":
-		return httpConnect{baseProxy{prot: prot, host: host, port: port, user: user, pass: pass}}, nil
+		return httpConnect{baseProxy{prot: prot, host: host, port: port, user: user, pass: pass, name: name}}, nil
 	default:
 		err := fmt.Errorf("unknown proxy protocol %v", prot)
 		return nil, err
@@ -161,7 +164,7 @@ func (chain proxyChain) connect(ctx context.Context, address string) (net.Conn, 
 
 		resolved, ok := gHosts[host]
 		if ok {
-			gMetaLogger.Debugf("%v appears in custom hosts file, resolving it to %v", host, resolved)
+			gMetaLogger.Infof("%v appears in custom hosts file, resolving it to %v", host, resolved)
 			address = net.JoinHostPort(resolved, port)
 		}
 	}
@@ -196,14 +199,8 @@ func (chain proxyChain) connect(ctx context.Context, address string) (net.Conn, 
 	}
 	gMetaLogger.Debugf("Initiate connection to %v", address)
 
-	// timeout context used to stop the connection through the proxy chain after chain.tcpReadTimeout millisecond
-	gMetaLogger.Debugf("timeout : %v", chain.tcpReadTimeout)
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(chain.tcpReadTimeout)*time.Millisecond)
-	defer cancel()
-
 	// Start connectN
 	conn, repr, err := chain.connectN(ctx, len(chain.proxies), address)
-	gMetaLogger.Debugf("connectN returned before timeout")
 	return conn, repr, err
 
 }
@@ -217,7 +214,10 @@ func (chain proxyChain) connectN(ctx context.Context, n int, address string) (co
 
 	if n == 0 { // If the subchain contains no proxy, directly connect to the provided address
 		gMetaLogger.Debugf("connectN called with n=0. Connect to %v directly.", address)
-		conn, err = d.DialContext(ctx, "tcp", address)
+
+		connectCtx, cancel := context.WithTimeout(ctx, time.Duration(chain.tcpConnectTimeout)*time.Millisecond)
+		defer cancel()
+		conn, err = d.DialContext(connectCtx, "tcp", address)
 		if err != nil {
 			repr += fmt.Sprintf("-X-> %v (%v)", address, err.Error())
 		} else {
@@ -228,12 +228,14 @@ func (chain proxyChain) connectN(ctx context.Context, n int, address string) (co
 
 		if n == 1 { // If the subchain contains only one proxy, establish a direct TCP connection to the proxy and obtain net.Conn with net.Dial
 			gMetaLogger.Debugf("connectN called with n=1. Connect to the only proxy %v", (chain.proxies[n-1]).address())
-			conn, err = d.DialContext(ctx, "tcp", (chain.proxies[n-1]).address())
+			connectCtx, cancel := context.WithTimeout(ctx, time.Duration(chain.tcpConnectTimeout)*time.Millisecond)
+			defer cancel()
+			conn, err = d.DialContext(connectCtx, "tcp", (chain.proxies[n-1]).address())
 			if err != nil {
-				repr += fmt.Sprintf("-X-> %v (%v)", (chain.proxies[n-1]).address(), err.Error())
+				repr += fmt.Sprintf("-X-> %v[%v] (%v)", (chain.proxies[n-1]).address(), (chain.proxies[n-1]).alias(), err.Error())
 				return
 			}
-			repr += fmt.Sprintf("---> %v", (chain.proxies[n-1]).address())
+			repr += fmt.Sprintf("---> %v[%v]", (chain.proxies[n-1]).address(), (chain.proxies[n-1]).alias())
 
 		} else { // Otherwise (multiple proxies), recursively call connectN to obtain an "indirect" TCP connection to the suchain's last proxy through the 1-proxy-shorter subchain.
 			gMetaLogger.Debugf("connectN called with n=%v (>1). Recursively calling connectN.", n)
@@ -250,17 +252,18 @@ func (chain proxyChain) connectN(ctx context.Context, n int, address string) (co
 		resultCh := make(chan error)
 
 		go func() {
-			resultCh <- (chain.proxies[n-1]).handshake(conn, address)
+			resultCh <- (chain.proxies[n-1]).handshake(conn, address, chain.tcpReadTimeout) //handshake returns at max after a few tcpReadTimeout,
+			// or if all io is cancelled by closing conn (the upstream connection socket), or if everything goes fine
 			close(resultCh)
 		}()
 
 		select {
 		case result := <-resultCh:
-			gMetaLogger.Debugf("handshake returned before timeout")
+			gMetaLogger.Debugf("handshake returned before ctx cancellation")
 			err = result
 		case <-ctx.Done():
-			gMetaLogger.Errorf("timeout during handshake with %v for %v", chain.proxies[n-1].address(), address)
-			err = fmt.Errorf("timeout during handshake()")
+			gMetaLogger.Errorf("ctx was cancelled during handshake with %v for %v: %v", chain.proxies[n-1].address(), address, ctx.Err())
+			err = fmt.Errorf("ctx was cancelled during handshake: %v", ctx.Err())
 		}
 
 		if err != nil {
