@@ -22,6 +22,17 @@ go install -tags pac github.com/synacktiv/bbs@master
 
 Note: PAC relies on unaudited third-party libraries.
 
+The bbscli.py python CLI is provided to ease configuration of bbs and avoid writing JSON files manually.
+It requires `pyparsing` library, which is packaged by Debian:
+```
+apt install python3-pyparsing
+```
+If the library is not packaged by your distribution, it can be installed using pip:
+```
+pip install pyparsing
+``` 
+
+
 
 ## Configuration
 
