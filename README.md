@@ -79,7 +79,7 @@ Here is an example of such configuration:
           "route": "chain1"
         },
         {
-          "comment": "Route web traffic towards 10.35.0.0/16 through proxy2",
+          "comment": "Route non web traffic towards 10.35.0.0/16 through proxy2",
           "rules": {
             "rule1": {
               "rule": "subnet",
@@ -89,7 +89,8 @@ Here is an example of such configuration:
             "rule2": {
               "rule": "regexp",
               "variable": "port",
-              "content": "^(80|443)$"
+              "content": "^(80|443)$",
+              "negate": "true"
             }
           },
           "route": "proxy2"
@@ -110,7 +111,8 @@ Here is an example of such configuration:
             "variable": "host",
             "content": "(?i)^(.*\\.)?corp\\.local$"
           },
-          "route": "chain1"
+          "route": "chain1",
+          "disable": "true"
         }
       ]
     },
@@ -202,7 +204,7 @@ Block fields:
  - `disable` (bool)
 
 Rule fields: 
- - `rule` (string): rule type, `regexp`, `subnet` or `true`.
+ - `rule` (string): rule type, `regexp`, `subnet`.
  - `variable` (string): variable for regexp evaluation, `host`, `port` or `addr` (host:port).
  - `content` (string): content of the rule, depends on the rule type (see below).
  - `negate` (bool) [optional]: whether to negate the rule.
@@ -250,8 +252,9 @@ key IP address will be replaced by the value IP address. Similarly, map values
 may be hostnames and will replace the corresponding map key.
 
 If defined, custom host resolutions occur at the beginning of the connection phase, 
-before any local DNS resolution (if the chain is configured with proxyDns=false) and 
-before sending the destination address to the various proxies of the chain.
+after the routing decision is made and before any local DNS resolution (if the chain 
+is configured with proxyDns=false) and before sending the destination address to the
+ various proxies of the chain.
 
 ### PAC script
 
