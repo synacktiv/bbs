@@ -6,7 +6,7 @@ mkdir -p ~/.config/bbs/logs/ # create configuration tree
 vim -p ~/.config/bbs/bbs.json # create configuration file
 mkdir -p ~/.config/systemd/user/
 loginctl enable-linger # make user systemd services persistent across logons
-systemctl --user enable --now bbs.service # bbs server
-systemctl --user enable --now bbs-watcher.service # bbs-watcher
-systemctl --user enable --now bbs-watcher.path # bbs-watcher trigger
+systemctl --user start bbs # To start bbs
+systemctl --user stop bbs # To stop bbs
+systemctl --user enable --now bbs.service # To autostart bbs server
 ```
