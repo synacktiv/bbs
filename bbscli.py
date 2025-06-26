@@ -487,6 +487,10 @@ class Config:
         """Returns a list of routing table names."""
         return list(self.contents[self.GLOBAL_KEY_ROUTES].keys())
     
+    def is_route_valid(self, route_target):
+        """Checks if a route target is valid (either 'drop' or an existing chain (or implicit chain based on proxy name))."""
+        return route_target == self.ROUTERULE_DROP or route_target in self.contents[self.GLOBAL_KEY_CHAINS] or route_target in self.contents[self.GLOBAL_KEY_PROXIES]
+    
     def update_default_route(self, table_name, new_default):
         """Updates the default route for a given table."""
         if table_name not in self.contents[self.GLOBAL_KEY_ROUTES]:
@@ -494,7 +498,7 @@ class Config:
             return False
 
         # Validate the new default route (must be 'drop' or an existing chain)
-        if new_default != self.ROUTERULE_DROP and new_default not in self.contents[self.GLOBAL_KEY_CHAINS]:
+        if not self.is_route_valid(new_default):
             print(f"Error: Default route '{new_default}' is invalid. Use 'drop' or an existing chain name.")
             return False
 
@@ -521,7 +525,7 @@ class Config:
         table_blocks = table.setdefault(self.TABLE_KEY_BLOCKS, [])
 
         # Validate route target (must be a chain or 'drop')
-        if route_target != self.ROUTERULE_DROP and route_target not in self.contents[self.GLOBAL_KEY_CHAINS]:
+        if not self.is_route_valid(route_target):
             print(f"Error: Route target chain '{route_target}' does not exist. Use 'drop' or an existing chain name.")
             return False
 
@@ -573,7 +577,7 @@ class Config:
                     route_block[self.ROUTEBLOCK_KEY_RULES] = rule_dict
                 if route_target is not None:
                     # Validate route target (must be a chain or 'drop')
-                    if route_target != self.ROUTERULE_DROP and route_target not in self.contents[self.GLOBAL_KEY_CHAINS]:
+                    if not self.is_route_valid(route_target):
                         print(f"Error: Route target chain '{route_target}' does not exist. Use 'drop' or an existing chain name.")
                         return False
                     route_block[self.ROUTEBLOCK_KEY_ROUTE] = route_target
@@ -805,24 +809,47 @@ class RuleParser:
 
 # --- Subcommand Functions ---
 
-def subcommand_show(args, config):
+def subcommand_show(args, config: Config):
     # This was a placeholder, let's make it useful or remove it
-    print(f"Showing configuration section: {args.element}")
     if args.element == "proxies":
         subcommand_proxy_list(args, config)
     elif args.element == "chains":
         subcommand_chain_list(args, config)
-    elif args.element == "routes":
+    elif args.element == "tables":
         subcommand_route_list_tables(args, config) # List tables first
         tables = config.get_routing_tables()
         if tables:
              print("\nUse 'route list <table>' to see rules for a specific table.")
         else:
              print("No routing tables defined.")
+    elif args.element == "routes":
+        for table in config.get_routing_tables():
+            args.table = table  # Temporarily set table for route listing
+            subcommand_route_list(args, config)
+            print("")
+        args.table = None  # Reset table
     elif args.element == "servers":
         subcommand_server_list(args, config)
     elif args.element == "hosts":
         subcommand_hosts_list(args, config)
+    elif args.element == "all":
+        subcommand_server_list(args, config)
+        print("")
+
+        subcommand_proxy_list(args, config)
+        print("")
+
+        subcommand_chain_list(args, config)
+        print("")
+
+        for table in config.get_routing_tables():
+            args.table = table  # Temporarily set table for route listing
+            subcommand_route_list(args, config)
+            print("")
+        args.table = None  # Reset table
+
+        subcommand_hosts_list(args, config)
+        print("")
     else:
         print(f"Unknown element '{args.element}'")
 
@@ -893,11 +920,14 @@ def subcommand_chain_list(args, config):
         print("No chains defined.")
         return
     for name, data in chains.items():
-        proxies = ", ".join(data.get(Config.CHAIN_KEY_PROXIES, []))
-        read_timeout = f", ReadTimeout: {data[Config.CHAIN_KEY_TCPREADTIMEOUT]}" if Config.CHAIN_KEY_TCPREADTIMEOUT in data else ""
-        conn_timeout = f", ConnectTimeout: {data[Config.CHAIN_KEY_TCPCONNECTTIMEOUT]}" if Config.CHAIN_KEY_TCPCONNECTTIMEOUT in data else ""
-        proxy_dns = f", ProxyDNS: {data[Config.CHAIN_KEY_PROXYDNS]}" if Config.CHAIN_KEY_PROXYDNS in data else ""
-        print(f"{name}: Proxies=[{proxies}]{read_timeout}{conn_timeout}{proxy_dns}")
+        proxies = " -> ".join(data.get(Config.CHAIN_KEY_PROXIES, []))
+        read_timeout = f"|RT: {data[Config.CHAIN_KEY_TCPREADTIMEOUT]}" if Config.CHAIN_KEY_TCPREADTIMEOUT in data else ""
+        conn_timeout = f"|CT: {data[Config.CHAIN_KEY_TCPCONNECTTIMEOUT]}" if Config.CHAIN_KEY_TCPCONNECTTIMEOUT in data else ""
+        proxy_dns = f"ProxyDNS" if Config.CHAIN_KEY_PROXYDNS in data else ""
+        opts = f"{proxy_dns}{read_timeout}{conn_timeout}"
+        if opts !="":
+            opts = f" [{opts}]"
+        print(f"{name}: {proxies}{opts}")
 
 def subcommand_chain_add(args, config):
     name = args.name if args.name else config._get_unused_chain_name()
@@ -1056,7 +1086,7 @@ def main():
 
     # --- Show Command ---
     parser_show = subparsers_global.add_parser("show", help="Show sections of the current config")
-    parser_show.add_argument("element", choices=["proxies", "chains", "routes", "servers", "hosts", "all"], default="all", nargs="?", help="Config section to show (default: all)")
+    parser_show.add_argument("element", choices=["proxies", "chains", "tables", "routes", "servers", "hosts", "all"], default="all", nargs="?", help="Config section to show (default: all)")
     parser_show.set_defaults(func=subcommand_show) # Will handle 'all' internally
 
     # --- Host Command ---
