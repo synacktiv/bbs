@@ -353,6 +353,23 @@ class Config:
         self.save()
         print(f"Server '{connstring}' added at index {len(self.contents[self.GLOBAL_KEY_SERVERS]) - 1}.")
         return True
+    
+    def add_server_fwd(self, local_host, local_port, chain, remote_host, remote_port):
+        """Adds a forwarder server with the format: fwd://local_host:local_port:chain:remote_host:remote_port"""
+        connstring = f"fwd://{local_host}:{local_port}:{chain}:{remote_host}:{remote_port}"
+        # Check if server already exists (exact match)
+        if connstring in self.contents[self.GLOBAL_KEY_SERVERS]:
+            print(f"Error: Forwarder '{connstring}' already exists.")
+            return False
+        # Check if chain exists
+        if not self.is_route_valid(chain):
+            print(f"Error: Chain '{chain}' does not exist. Create it first using 'chain add'.")
+            return False
+
+        self.contents[self.GLOBAL_KEY_SERVERS].append(connstring)
+        self.save()
+        print(f"Forwarder '{connstring}' added at index {len(self.contents[self.GLOBAL_KEY_SERVERS]) - 1}.")
+        return True
 
     def delete_server(self, index=None):
         if index is None: # Delete all
@@ -960,6 +977,12 @@ def subcommand_server_add(args, config):
     print(f"Adding server {args.protocol}://{args.host}:{args.port} using table '{args.table}'...")
     config.add_server(args.protocol, args.host, args.port, args.table)
 
+def subcommand_server_add_fwd(args, config: Config):
+    connstring = f"fwd://{args.local_host}:{args.local_port}:{args.chain}:{args.remote_host}:{args.remote_port}"
+    print(f"Adding forwarder {connstring}...")
+    config.add_server_fwd(args.local_host, args.local_port, args.chain, args.remote_host, args.remote_port)
+    # Note: The `add_server` method may need to be updated to handle the full forwarder format.
+
 def subcommand_server_del(args, config):
     if args.index == "all":
         print("Deleting all servers...")
@@ -1177,11 +1200,20 @@ def main():
     parser_server_list.set_defaults(func=subcommand_server_list)
 
     parser_server_add = subparsers_server.add_parser("add", help="Add a new listening server")
-    parser_server_add.add_argument("protocol", choices=["socks5", "http", "fwd"], help="Server protocol")
+    parser_server_add.add_argument("protocol", choices=["socks5", "http"], help="Server protocol")
     parser_server_add.add_argument("host", help="Host/IP to listen on (e.g., 127.0.0.1, 0.0.0.0)")
     parser_server_add.add_argument("port", help="Port to listen on")
     parser_server_add.add_argument("table", help="Routing table name to use for this server")
     parser_server_add.set_defaults(func=subcommand_server_add)
+
+    # Add Forwarder
+    parser_server_add_fwd = subparsers_server.add_parser("add-fwd", help="Add a new forwarder")
+    parser_server_add_fwd.add_argument("local_host", help="Local host/IP to listen on")
+    parser_server_add_fwd.add_argument("local_port", help="Local port to listen on")
+    parser_server_add_fwd.add_argument("chain", help="Proxy chain name to use")
+    parser_server_add_fwd.add_argument("remote_host", help="Remote host/IP to forward to")
+    parser_server_add_fwd.add_argument("remote_port", help="Remote port to forward to")
+    parser_server_add_fwd.set_defaults(func=subcommand_server_add_fwd)
 
     parser_server_del = subparsers_server.add_parser("del", help="Delete a listening server")
     parser_server_del.add_argument("index", help='Index of the server to delete (from "server list"), or "all"')
