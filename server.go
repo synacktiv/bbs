@@ -172,7 +172,9 @@ func (s *server) run() {
 	// Creates a TCP socket and listen on address for incomming client connections
 	l, err := net.Listen("tcp", s.address())
 	if err != nil {
-		gMetaLogger.Panic(err)
+		gMetaLogger.Error(err)
+		s.stop() // If we cannot listen on the address, we stop the server
+		return
 	}
 	defer l.Close()
 	gMetaLogger.Infof("%v server started on %v", s.prot, s.address())
