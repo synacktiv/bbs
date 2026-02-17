@@ -47,13 +47,15 @@ func (h httpHandler) connHandle(client net.Conn, ctx context.Context, cancel con
 
 	if request.Method != "CONNECT" {
 		gMetaLogger.Errorf("only HTTP CONNECT method is supported")
-		(&http.Response{StatusCode: 405, ProtoMajor: 1}).Write(client)
+		resp := &http.Response{StatusCode: 405, ProtoMajor: request.ProtoMajor, ProtoMinor: request.ProtoMinor}
+		resp.Write(client)
 		return
 	}
 
 	if request.Host != request.URL.Host {
 		gMetaLogger.Error("host and URL do not match")
-		(&http.Response{StatusCode: 400, ProtoMajor: 1}).Write(client)
+		resp := &http.Response{StatusCode: 400, ProtoMajor: request.ProtoMajor, ProtoMinor: request.ProtoMinor}
+		resp.Write(client)
 		return
 	}
 
@@ -71,7 +73,8 @@ func (h httpHandler) connHandle(client net.Conn, ctx context.Context, cancel con
 
 		if err != nil {
 			gMetaLogger.Errorf("error getting route PAC: %v", err)
-			(&http.Response{StatusCode: 400, ProtoMajor: 1}).Write(client)
+			resp := &http.Response{StatusCode: 400, ProtoMajor: request.ProtoMajor, ProtoMinor: request.ProtoMinor}
+			resp.Write(client)
 			return
 		}
 
@@ -81,7 +84,8 @@ func (h httpHandler) connHandle(client net.Conn, ctx context.Context, cancel con
 		table, ok := gRoutingConf.routing[h.table]
 		if !ok {
 			gMetaLogger.Errorf("table %v not defined in routing configuration", table)
-			(&http.Response{StatusCode: 400, ProtoMajor: 1}).Write(client)
+			resp := &http.Response{StatusCode: 400, ProtoMajor: request.ProtoMajor, ProtoMinor: request.ProtoMinor}
+			resp.Write(client)
 			gRoutingConf.mu.RUnlock()
 			return
 		}
@@ -90,7 +94,8 @@ func (h httpHandler) connHandle(client net.Conn, ctx context.Context, cancel con
 
 		if err != nil {
 			gMetaLogger.Errorf("error getting route with JSON conf: %v", err)
-			(&http.Response{StatusCode: 400, ProtoMajor: 1}).Write(client)
+			resp := &http.Response{StatusCode: 400, ProtoMajor: request.ProtoMajor, ProtoMinor: request.ProtoMinor}
+			resp.Write(client)
 			return
 		}
 	}
@@ -100,7 +105,8 @@ func (h httpHandler) connHandle(client net.Conn, ctx context.Context, cancel con
 	if chainStr == "drop" {
 		gMetaLogger.Debugf("dropping connection to %v", addr)
 		gMetaLogger.Auditf("| %v\t| DROPPED\t| %v\t| %v\t| %v\n", h, client, chainStr, addr)
-		(&http.Response{StatusCode: 403, ProtoMajor: 1}).Write(client)
+		resp := &http.Response{StatusCode: 403, ProtoMajor: request.ProtoMajor, ProtoMinor: request.ProtoMinor}
+		resp.Write(client)
 		return
 	}
 
@@ -110,7 +116,8 @@ func (h httpHandler) connHandle(client net.Conn, ctx context.Context, cancel con
 
 	if !ok {
 		gMetaLogger.Errorf("chain '%v' returned by PAC script is not declared in configuration", chainStr)
-		(&http.Response{StatusCode: 500, ProtoMajor: 1}).Write(client)
+		resp := &http.Response{StatusCode: 500, ProtoMajor: request.ProtoMajor, ProtoMinor: request.ProtoMinor}
+		resp.Write(client)
 		return
 	}
 
@@ -124,7 +131,8 @@ func (h httpHandler) connHandle(client net.Conn, ctx context.Context, cancel con
 	if err != nil {
 		gMetaLogger.Error(err)
 		gMetaLogger.Auditf("| %v\t| ERROR\t| %v\t| %v\t| %v\t| %v\n", h, client, chainStr, addr, chainRepresentation)
-		(&http.Response{StatusCode: 502, ProtoMajor: 1}).Write(client)
+		resp := &http.Response{StatusCode: 502, ProtoMajor: request.ProtoMajor, ProtoMinor: request.ProtoMinor}
+		resp.Write(client)
 		return
 	}
 	defer target.Close()
@@ -135,9 +143,9 @@ func (h httpHandler) connHandle(client net.Conn, ctx context.Context, cancel con
 	gMetaLogger.Auditf("| %v\t| OPEN\t| %v\t| %v\t| %v\t| %v\n", h, client, chainStr, addr, chainRepresentation)
 	defer gMetaLogger.Auditf("| %v\t| CLOSE\t| %v\t| %v\t| %v\t| %v\n", h, client, chainStr, addr, chainRepresentation)
 
-	// Send HTTP Success
-
-	err = (&http.Response{StatusCode: 200, ProtoMajor: 1}).Write(client)
+	// Send HTTP Success with matching protocol version
+	resp := &http.Response{StatusCode: 200, ProtoMajor: request.ProtoMajor, ProtoMinor: request.ProtoMinor}
+	err = resp.Write(client)
 	if err != nil {
 		gMetaLogger.Error(err)
 		return
