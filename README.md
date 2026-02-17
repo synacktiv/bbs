@@ -103,7 +103,7 @@ Here is an example of such configuration:
               "rule": "regexp",
               "variable": "port",
               "content": "^(80|443)$",
-              "negate": "true"
+              "negate": true
             }
           },
           "route": "proxy2"
@@ -125,7 +125,7 @@ Here is an example of such configuration:
             "content": "(?i)^(.*\\.)?corp\\.local$"
           },
           "route": "chain1",
-          "disable": "true"
+          "disable": true
         }
       ]
     },
