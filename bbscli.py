@@ -658,6 +658,28 @@ class Config:
             print(f"Error: Index '{index}' must be an integer.")
             return False
 
+    def add_routing_table(self, table_name, default_route=None):
+        """Creates a new empty routing table with the given default route."""
+        if table_name in self.contents[self.GLOBAL_KEY_ROUTES]:
+            print(f"Error: Routing table '{table_name}' already exists.")
+            return False
+
+        if default_route is None:
+            default_route = self.ROUTERULE_DROP
+
+        # Validate the default route
+        if default_route != self.ROUTERULE_DROP and not self.is_route_valid(default_route):
+            print(f"Error: Default route '{default_route}' is invalid. Use 'drop' or an existing chain/proxy name.")
+            return False
+
+        self.contents[self.GLOBAL_KEY_ROUTES][table_name] = {
+            self.TABLE_KEY_DEFAULT: default_route,
+            self.TABLE_KEY_BLOCKS: []
+        }
+        self.save()
+        print(f"Routing table '{table_name}' created with default route '{default_route}'.")
+        return True
+
     def delete_routing_table(self, table_name):
         """Deletes an entire routing table."""
         if table_name not in self.contents[self.GLOBAL_KEY_ROUTES]:
@@ -1094,6 +1116,11 @@ def subcommand_route_del_table(args, config):
      print(f"Deleting routing table '{args.table}'...")
      config.delete_routing_table(args.table)
 
+def subcommand_route_new_table(args, config: Config):
+    default = args.default if args.default else None
+    print(f"Creating empty routing table '{args.table}'" + (f" with default route '{default}'" if default else " with default route 'drop'") + "...")
+    config.add_routing_table(args.table, default_route=default)
+
 
 # --- Main Execution ---
 def main():
@@ -1279,6 +1306,12 @@ def main():
     parser_route_del_table = subparsers_route.add_parser("del-table", help="Delete an entire routing table")
     parser_route_del_table.add_argument("table", help="Name of the routing table to delete")
     parser_route_del_table.set_defaults(func=subcommand_route_del_table)
+
+    # New (empty) Table
+    parser_route_new_table = subparsers_route.add_parser("new-table", help="Create a new empty routing table")
+    parser_route_new_table.add_argument("table", help="Name of the new routing table")
+    parser_route_new_table.add_argument("-d", "--default", help="Default route for the table (chain name or 'drop', default: 'drop')", default=None)
+    parser_route_new_table.set_defaults(func=subcommand_route_new_table)
 
     # --- Parse Arguments ---
     args = parser_global.parse_args()
