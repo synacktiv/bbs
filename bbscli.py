@@ -1250,7 +1250,7 @@ def main():
     # Add Rule
     parser_route_add = subparsers_route.add_parser("add", help="Add a new routing rule to a table")
     parser_route_add.add_argument("table", help="Name of the table to add the rule to (will be created if it doesn't exist)")
-    parser_route_add.add_argument("expression", help="Rule expression (e.g., 'host is 1.1.1.1', 'port is 80 or port is 443', 'not host in 192.168.1.0/24')")
+    parser_route_add.add_argument("expression", help="Rule expression (e.g., 'host is 1.1.1.1', 'port is 80 or (port is 443 and host is example.com)', 'not host in 192.168.1.0/24', 'addr is 127.0.0.1:445', 'host like \"(?i)^(.*\.)?corp\.local$\"')")
     parser_route_add.add_argument("route_target", help="Target chain name or 'drop'")
     parser_route_add.add_argument("-p", "--position", type=int, help="Position index to insert the rule at (default: append)")
     parser_route_add.add_argument("--comment", help="Optional comment for the rule")
