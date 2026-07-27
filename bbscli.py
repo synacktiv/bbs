@@ -840,9 +840,11 @@ class RuleParser:
             # return json.dumps(result, separators=(',', ':'))
             return result
         except pp.ParseException as e:
-            return f"Error: Syntax error in expression at char {e.loc}. {e.msg}"
+            print(f"Error: Syntax error in expression at char {e.loc}. {e.msg}")
+            return None
         except Exception as e:
-            return f"An unexpected error occurred: {e}"
+            print(f"An unexpected error occurred: {e}")
+            return None
         
 
 
@@ -1086,8 +1088,8 @@ def subcommand_route_update(args, config: Config):
     if args.expression:
         print(f"Parsing rule expression: '{args.expression}'")
         rule_dict = parser.parse(args.expression)
-        if isinstance(rule_dict, str):  # If parsing failed, it will return an error string
-            print(rule_dict)
+        if not rule_dict: 
+            print("Failed to update rule due to parsing error.")
             return
 
     # Determine disable state
