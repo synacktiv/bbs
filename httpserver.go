@@ -47,7 +47,7 @@ func (h httpHandler) connHandle(client net.Conn, ctx context.Context, cancel con
 
 	if request.Method != "CONNECT" {
 		gMetaLogger.Errorf("only HTTP CONNECT method is supported")
-		resp := &http.Response{StatusCode: 405, ProtoMajor: request.ProtoMajor, ProtoMinor: request.ProtoMinor}
+		resp := &http.Response{StatusCode: 405, Status: "405 Method Not Allowed by bbs, use CONNECT", ProtoMajor: request.ProtoMajor, ProtoMinor: request.ProtoMinor}
 		resp.Write(client)
 		return
 	}
